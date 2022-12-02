@@ -22,7 +22,6 @@ def build():
     count = build_mem(main, "count", WIDTH, 1)
 
     # Temporaries.
-    global_max = main.reg("global_max", WIDTH)
     index = main.reg("index", IDX_WIDTH)
     count_reg = main.reg("count_reg", IDX_WIDTH)
 
@@ -91,11 +90,31 @@ def build():
         new_elf_reg.in_ = eq.out
         new_elf_check.done = new_elf_reg.done
 
+    # Update the global maximum calorie count:
+    # global_max = max(accum, global_max)
+    global_max = main.reg("global_max", WIDTH)
+    max_gt = main.cell("max_gt", ast.Stdlib().op("gt", WIDTH, signed=False))
+    max_mux = main.cell("max_mux",
+                        ast.Stdlib().op("mux", WIDTH, signed=False))
+    with main.group("update_max") as update_max:
+        max_gt.left = accum.out
+        max_gt.right = global_max.out
+
+        max_mux.cond = max_gt.out
+        max_mux.tru = accum.out
+        max_mux.fal = global_max.out
+
+        global_max.in_ = max_mux.out
+        global_max.write_en = 1
+        update_max.done = global_max.done
+
+    # The control program.
     main.control += [
         {init_count, init_index},
         while_(lt.out, cmp, [
             new_elf_check,
             if_(new_elf_reg.out, None, [
+                update_max,
                 clear_accum,
             ]),
             accum_calories,

@@ -9,6 +9,8 @@ number of calorie numbers.
 import sys
 import json
 
+MAX_SIZE = 4096
+
 
 def convert(infile):
     calories = []
@@ -25,10 +27,12 @@ def convert(infile):
             is_first = True
 
     assert len(calories) == len(markers)
+    assert len(calories) <= MAX_SIZE
+    padding = [0] * (MAX_SIZE - len(calories))
 
     return {
         "calories": {
-            "data": calories,
+            "data": calories + padding,
             "format": {
                 "numeric_type": "bitnum",
                 "is_signed": False,
@@ -36,7 +40,7 @@ def convert(infile):
             }
         },
         "markers": {
-            "data": markers,
+            "data": markers + padding,
             "format": {
                 "numeric_type": "bitnum",
                 "is_signed": False,

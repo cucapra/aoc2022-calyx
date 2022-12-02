@@ -1,3 +1,6 @@
+.PHONY: all
+all: sample
+
 accel.futil: accelgen.py
 	python3 $^ > $@
 
@@ -5,5 +8,6 @@ accel.futil: accelgen.py
 	python3 convert.py < $^ > $@
 
 .PHONY: run
-run: accel.futil sample.json
-	fud e $< --to dat --through verilog -s verilog.data sample.json
+%: accel.futil %.json
+	fud e $< --to dat --through verilog -s verilog.data $*.json | \
+		jq .memories.answer[0]

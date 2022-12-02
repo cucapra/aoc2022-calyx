@@ -20,6 +20,7 @@ def build():
     calories = build_mem(main, "calories", WIDTH, MAX_SIZE)
     markers = build_mem(main, "markers", 1, MAX_SIZE)
     count = build_mem(main, "count", WIDTH, 1)
+    answer = build_mem(main, "answer", WIDTH, 1)
 
     # Temporaries.
     index = main.reg("index", IDX_WIDTH)
@@ -108,6 +109,13 @@ def build():
         global_max.write_en = 1
         update_max.done = global_max.done
 
+    # Publish the answer back to an interface memory.
+    with main.group("finish") as finish:
+        answer.write_en = 1
+        answer.addr0 = 0
+        answer.in_ = global_max.out
+        finish.done = answer.write_done
+
     # The control program.
     main.control += [
         {init_count, init_index},
@@ -120,6 +128,7 @@ def build():
             accum_calories,
             incr,
         ]),
+        finish,
     ]
 
     return prog.program

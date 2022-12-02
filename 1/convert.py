@@ -9,6 +9,7 @@ number of calorie numbers.
 import sys
 import json
 
+WIDTH = 32
 MAX_SIZE = 4096
 
 
@@ -36,7 +37,7 @@ def convert(infile):
             "format": {
                 "numeric_type": "bitnum",
                 "is_signed": False,
-                "width": 32,
+                "width": WIDTH,
             }
         },
         "markers": {
@@ -52,7 +53,15 @@ def convert(infile):
             "format": {
                 "numeric_type": "bitnum",
                 "is_signed": False,
-                "width": 32,
+                "width": WIDTH,
+            },
+        },
+        "answer": {
+            "data": [0],
+            "format": {
+                "numeric_type": "bitnum",
+                "is_signed": False,
+                "width": WIDTH,
             },
         },
     }

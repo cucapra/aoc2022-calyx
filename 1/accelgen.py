@@ -1,4 +1,4 @@
-from calyx.builder import Builder, const, while_
+from calyx.builder import Builder, while_
 from calyx import py_ast as ast
 
 WIDTH = 32
@@ -78,9 +78,23 @@ def build():
         accum.write_en = calories.read_done
         accum_calories.done = accum.done
 
+    # Check whether we're looking at a new elf. We have to register the
+    # result of the (sequential) check so we can use it in an `if`.
+    eq = main.cell("eq", ast.Stdlib().op("eq", 1, signed=False))
+    new_elf_reg = main.reg("new_elf_reg", 1)
+    with main.group("new_elf_check") as new_elf_check:
+        markers.read_en = 1
+        markers.addr0 = index.out
+        eq.left = markers.out
+        eq.right = 1
+        new_elf_reg.write_en = markers.read_done
+        new_elf_reg.in_ = eq.out
+        new_elf_check.done = new_elf_reg.done
+
     main.control += [
         {init_count, init_index},
         while_(lt.out, cmp, [
+            new_elf_check,
             clear_accum,
             accum_calories,
             incr,

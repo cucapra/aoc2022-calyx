@@ -44,7 +44,7 @@ def build():
         init_index.done = index.done
 
     # Loop control comparison.
-    lt = main.cell("lt", ast.Stdlib().op("lt", WIDTH, signed=False))
+    lt = main.cell("lt", ast.Stdlib().op("lt", IDX_WIDTH, signed=False))
     with main.comb_group("cmp") as cmp:
         lt.left = index.out
         lt.right = count_reg.out
@@ -55,6 +55,7 @@ def build():
         incr_add.left = index.out
         incr_add.right = 1
         index.in_ = incr_add.out
+        index.write_en = 1
         incr.done = index.done
 
     main.control += [

@@ -1,5 +1,5 @@
-from calyx.builder import Builder, const
-from calyx import py_ast
+from calyx.builder import Builder, const, while_
+from calyx import py_ast as ast
 
 WIDTH = 32
 MAX_SIZE = 4096
@@ -8,7 +8,7 @@ IDX_WIDTH = MAX_SIZE.bit_length()
 
 def build_mem(comp, name, width, size):
     idx_width = size.bit_length()
-    inst = py_ast.CompInst("seq_mem_d1", [width, size, idx_width])
+    inst = ast.CompInst("seq_mem_d1", [width, size, idx_width])
     return comp.cell(name, inst, is_external=True)
 
 
@@ -27,12 +27,8 @@ def build():
     index = main.reg("index", IDX_WIDTH)
     count_reg = main.reg("count_reg", IDX_WIDTH)
 
-    # Operators.
-    add = main.add("add", WIDTH)
-    lt = main.cell("lt", py_ast.Stdlib().op("lt", WIDTH, signed=False))
-
     # Initialize count register for convenient access.
-    slice = main.cell("slice", py_ast.Stdlib().slice(WIDTH, IDX_WIDTH))
+    slice = main.cell("slice", ast.Stdlib().slice(WIDTH, IDX_WIDTH))
     with main.group("init_count") as init_count:
         count.addr0 = 0
         count.read_en = 1
@@ -47,8 +43,25 @@ def build():
         index.write_en = 1
         init_index.done = index.done
 
+    # Loop control comparison.
+    lt = main.cell("lt", ast.Stdlib().op("lt", WIDTH, signed=False))
+    with main.comb_group("cmp") as cmp:
+        lt.left = index.out
+        lt.right = count_reg.out
+
+    # Loop control increment.
+    incr_add = main.add("incr_add", IDX_WIDTH)
+    with main.group("incr") as incr:
+        incr_add.left = index.out
+        incr_add.right = 1
+        index.in_ = incr_add.out
+        incr.done = index.done
+
     main.control += [
-        {init_count, init_index}
+        {init_count, init_index},
+        while_(lt.out, cmp, [
+            incr,
+        ]),
     ]
 
     return prog.program

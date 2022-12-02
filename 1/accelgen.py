@@ -1,4 +1,4 @@
-from calyx.builder import Builder, while_
+from calyx.builder import Builder, while_, if_
 from calyx import py_ast as ast
 
 WIDTH = 32
@@ -95,7 +95,9 @@ def build():
         {init_count, init_index},
         while_(lt.out, cmp, [
             new_elf_check,
-            clear_accum,
+            if_(new_elf_reg.out, None, [
+                clear_accum,
+            ]),
             accum_calories,
             incr,
         ]),

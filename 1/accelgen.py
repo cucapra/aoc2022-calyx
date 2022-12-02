@@ -22,7 +22,6 @@ def build():
     count = build_mem(main, "count", WIDTH, 1)
 
     # Temporaries.
-    local_max = main.reg("local_max", WIDTH)
     global_max = main.reg("global_max", WIDTH)
     index = main.reg("index", IDX_WIDTH)
     count_reg = main.reg("count_reg", IDX_WIDTH)
@@ -32,6 +31,7 @@ def build():
     with main.group("init_count") as init_count:
         count.addr0 = 0
         count.read_en = 1
+
         count_reg.write_en = count.read_done
         slice.in_ = count.out
         count_reg.in_ = slice.out
@@ -58,9 +58,31 @@ def build():
         index.write_en = 1
         incr.done = index.done
 
+    # Reset calorie accumulator.
+    accum = main.reg("local_max", WIDTH)
+    with main.group("clear_accum") as clear_accum:
+        accum.in_ = 0
+        accum.write_en = 1
+        clear_accum.done = accum.done
+
+    # Accumulate calories.
+    add = main.add("add", WIDTH)
+    with main.group("accum_calories") as accum_calories:
+        calories.read_en = 1
+        calories.addr0 = index.out
+
+        add.left = calories.out
+        add.right = accum.out
+
+        accum.in_ = add.out
+        accum.write_en = calories.read_done
+        accum_calories.done = accum.done
+
     main.control += [
         {init_count, init_index},
         while_(lt.out, cmp, [
+            clear_accum,
+            accum_calories,
             incr,
         ]),
     ]

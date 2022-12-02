@@ -31,13 +31,17 @@ def build():
     add = main.add("add", WIDTH)
     lt = main.cell("lt", py_ast.Stdlib().op("lt", WIDTH, signed=False))
 
-    # Initialize count register and index counter.
+    # Initialize count register for convenient access.
+    slice = main.cell("slice", py_ast.Stdlib().slice(WIDTH, IDX_WIDTH))
     with main.group("init_count") as init_count:
         count.addr0 = 0
         count.read_en = 1
         count_reg.write_en = count.read_done
-        count_reg.in_ = count.out
+        slice.in_ = count.out
+        count_reg.in_ = slice.out
         init_count.done = count_reg.done
+
+    # Initialize index counter to zero. (Maybe this is unnecessary.)
     with main.group("init_index") as init_index:
         index.in_ = 0
         init_index.done = index.done

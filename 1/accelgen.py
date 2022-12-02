@@ -9,7 +9,7 @@ IDX_WIDTH = MAX_SIZE.bit_length()
 def build_mem(comp, name, width, size):
     idx_width = size.bit_length()
     inst = py_ast.CompInst("seq_mem_d1", [width, size, idx_width])
-    return comp.cell("calories", inst, is_external=True)
+    return comp.cell(name, inst, is_external=True)
 
 
 def build():
@@ -18,8 +18,8 @@ def build():
 
     # Interface memories.
     calories = build_mem(main, "calories", WIDTH, MAX_SIZE)
-    markers = build_mem(main, "calories", 1, MAX_SIZE)
-    count = build_mem(main, "calories", WIDTH, 1)
+    markers = build_mem(main, "markers", 1, MAX_SIZE)
+    count = build_mem(main, "count", WIDTH, 1)
 
     # Temporaries.
     local_max = main.reg("local_max", WIDTH)

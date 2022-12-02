@@ -44,6 +44,7 @@ def build():
     # Initialize index counter to zero. (Maybe this is unnecessary.)
     with main.group("init_index") as init_index:
         index.in_ = 0
+        index.write_en = 1
         init_index.done = index.done
 
     main.control += [

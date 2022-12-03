@@ -209,7 +209,7 @@ def build_topk(prog: Builder, k: int):
         for i in range(k):
             const_i = const(idx_width, i)
             regs[i].write_en = (min_idx.out == const_i) @ 1
-            regs[i].write_en = ~(min_idx.out == const_i) @ 0
+            regs[i].write_en = (min_idx.out != const_i) @ 0
             regs[i].in_ = (min_idx.out == const_i) @ topk.this().value
             upd.done = (min_idx.out == const_i) @ regs[i].done
 

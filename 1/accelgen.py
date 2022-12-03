@@ -1,4 +1,4 @@
-from calyx.builder import Builder, while_, if_, const
+from calyx.builder import Builder, while_, if_, invoke, const
 from calyx import py_ast as ast
 
 WIDTH = 32
@@ -59,7 +59,7 @@ def build():
         incr.done = index.done
 
     # Reset calorie accumulator.
-    accum = main.reg("local_max", WIDTH)
+    accum = main.reg("accum", WIDTH)
     with main.group("clear_accum") as clear_accum:
         accum.in_ = 0
         accum.write_en = 1
@@ -91,29 +91,15 @@ def build():
         new_elf_reg.in_ = eq.out
         new_elf_check.done = new_elf_reg.done
 
-    # Update the global maximum calorie count:
-    # global_max = max(accum, global_max)
-    global_max = main.reg("global_max", WIDTH)
-    max_gt = main.cell("max_gt", ast.Stdlib().op("gt", WIDTH, signed=False))
-    max_mux = main.cell("max_mux",
-                        ast.Stdlib().op("mux", WIDTH, signed=False))
-    with main.group("update_max") as update_max:
-        max_gt.left = accum.out
-        max_gt.right = global_max.out
-
-        max_mux.cond = max_gt.out
-        max_mux.tru = accum.out
-        max_mux.fal = global_max.out
-
-        global_max.in_ = max_mux.out
-        global_max.write_en = 1
-        update_max.done = global_max.done
+    # Machinery to track the top K elves.
+    topk_def = build_topk(prog, 3)  # TODO Should be a parameter.
+    topk = main.cell("topk", topk_def)
 
     # Publish the answer back to an interface memory.
     with main.group("finish") as finish:
         answer.write_en = 1
         answer.addr0 = 0
-        answer.in_ = global_max.out
+        answer.in_ = topk.total
         finish.done = answer.write_done
 
     # The control program.
@@ -122,7 +108,7 @@ def build():
         while_(lt.out, cmp, [
             new_elf_check,
             if_(new_elf_reg.out, None, [
-                update_max,
+                invoke(topk, in_value=accum.out),
                 clear_accum,
             ]),
             accum_calories,
@@ -131,7 +117,6 @@ def build():
         finish,
     ]
 
-    build_topk(prog, 3)
     return prog.program
 
 
@@ -226,6 +211,7 @@ def build_topk(prog: Builder, k: int):
             regs[i].write_en = (min_idx.out == const_i) @ 1
             regs[i].write_en = ~(min_idx.out == const_i) @ 0
             regs[i].in_ = (min_idx.out == const_i) @ topk.this().value
+            upd.done = (min_idx.out == const_i) @ regs[i].done
 
     # The control program.
     topk.control += if_(gt.out, check, upd)

@@ -166,7 +166,7 @@ def build_topk(prog: Builder, k: int):
     # up in a `comb group`, but it's not clear exactly where we would
     # `with` it.
     idx_width = k.bit_length()
-    with topk.continuous:
+    with topk.group("argmin") as argmin:
         last_val = None
         last_idx = None
         for i in range(1, k):
@@ -192,15 +192,23 @@ def build_topk(prog: Builder, k: int):
             # Record the current wires for the next comparison.
             last_val = val
             last_idx = idx
-    min_val = last_val
-    min_idx = last_idx
+
+        # Write the results into registers.
+        min_val_reg = topk.reg("min_val_reg", WIDTH)
+        min_val_reg.write_en = 1
+        min_val_reg.in_ = last_val.out
+        min_idx_reg = topk.reg("min_idx_reg", idx_width)
+        min_idx_reg.write_en = 1
+        min_idx_reg.in_ = last_idx.out
+
+        argmin.done = (min_val_reg.done & min_idx_reg.done) @ 1
 
     # Check whether the input value is bigger than the smallest stored
     # value.
     gt = topk.cell("gt", ast.Stdlib().op("gt", WIDTH, signed=False))
     with topk.comb_group("check") as check:
         gt.left = topk.this().value
-        gt.right = min_val.out
+        gt.right = min_val_reg.out
 
     # Replace the minimum value. Because we only have the index of the
     # register we need, we need a bunch of conditional logic to write
@@ -209,10 +217,10 @@ def build_topk(prog: Builder, k: int):
     with topk.group("upd") as upd:
         for i in range(k):
             const_i = const(idx_width, i)
-            regs[i].write_en = (min_idx.out == const_i) @ 1
-            regs[i].write_en = (min_idx.out != const_i) @ 0
-            regs[i].in_ = (min_idx.out == const_i) @ topk.this().value
-            done_part = (min_idx.out == const_i) & regs[i].done
+            regs[i].write_en = (min_idx_reg.out == const_i) @ 1
+            regs[i].write_en = (min_idx_reg.out != const_i) @ 0
+            regs[i].in_ = (min_idx_reg.out == const_i) @ topk.this().value
+            done_part = (min_idx_reg.out == const_i) & regs[i].done
             if done_expr:
                 done_expr |= done_part
             else:
@@ -220,7 +228,10 @@ def build_topk(prog: Builder, k: int):
         upd.done = done_expr @ 1
 
     # The control program.
-    topk.control += if_(gt.out, check, upd)
+    topk.control += [
+        argmin,
+        if_(gt.out, check, upd),
+    ]
 
     return topk
 

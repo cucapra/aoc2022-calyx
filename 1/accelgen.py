@@ -1,4 +1,5 @@
-from calyx.builder import Builder, while_, if_
+import sys
+from calyx.builder import Builder, while_, if_, invoke, const
 from calyx import py_ast as ast
 
 WIDTH = 32
@@ -12,7 +13,12 @@ def build_mem(comp, name, width, size):
     return comp.cell(name, inst, is_external=True)
 
 
-def build():
+def build(num_elves):
+    """Build the `main` function for AOC day 1.
+
+    `num_elves` is the number of elves whose total calorie count we will
+    maximize. Set to 1 for part 1 of the puzzle and 3 for part 2.
+    """
     prog = Builder()
     main = prog.component("main")
 
@@ -59,7 +65,7 @@ def build():
         incr.done = index.done
 
     # Reset calorie accumulator.
-    accum = main.reg("local_max", WIDTH)
+    accum = main.reg("accum", WIDTH)
     with main.group("clear_accum") as clear_accum:
         accum.in_ = 0
         accum.write_en = 1
@@ -91,29 +97,15 @@ def build():
         new_elf_reg.in_ = eq.out
         new_elf_check.done = new_elf_reg.done
 
-    # Update the global maximum calorie count:
-    # global_max = max(accum, global_max)
-    global_max = main.reg("global_max", WIDTH)
-    max_gt = main.cell("max_gt", ast.Stdlib().op("gt", WIDTH, signed=False))
-    max_mux = main.cell("max_mux",
-                        ast.Stdlib().op("mux", WIDTH, signed=False))
-    with main.group("update_max") as update_max:
-        max_gt.left = accum.out
-        max_gt.right = global_max.out
-
-        max_mux.cond = max_gt.out
-        max_mux.tru = accum.out
-        max_mux.fal = global_max.out
-
-        global_max.in_ = max_mux.out
-        global_max.write_en = 1
-        update_max.done = global_max.done
+    # Machinery to track the top K elves.
+    topk_def = build_topk(prog, num_elves)
+    topk = main.cell("topk", topk_def)
 
     # Publish the answer back to an interface memory.
     with main.group("finish") as finish:
         answer.write_en = 1
         answer.addr0 = 0
-        answer.in_ = global_max.out
+        answer.in_ = topk.total
         finish.done = answer.write_done
 
     # The control program.
@@ -122,17 +114,133 @@ def build():
         while_(lt.out, cmp, [
             new_elf_check,
             if_(new_elf_reg.out, None, [
-                update_max,
+                invoke(topk, in_value=accum.out),
                 clear_accum,
             ]),
             accum_calories,
             incr,
         ]),
+        invoke(topk, in_value=accum.out),  # Count last elf.
         finish,
     ]
 
     return prog.program
 
 
+def build_topk(prog: Builder, k: int):
+    """Build a component that tracks the largest K values it sees.
+
+    The strategy is that we keep the current "running" top K in K
+    registers (unordered). If the new value is bigger than the smallest
+    of these registers, we drop that smallest value and put the new
+    value in its place. This strategy avoid the need to do sequential
+    comparisons, or to keep a sorted list, but it does require some
+    "reduction" logic to find the smallest value every time. This is
+    probably acceptable for small K and admits reasonable parallelism;
+    for larger K, you might want to store state about the order of the
+    current top K.
+    """
+    topk = prog.component(f"top{k}")
+
+    # You invoke the component with a new value to "push" into the set,
+    # and you get the sum of the top K values you have ever pushed in
+    # the past.
+    topk.input("value", WIDTH)
+    topk.output("total", WIDTH)
+
+    # We keep track of the top K values in K registers.
+    regs = [
+        topk.reg(f"reg{i}", WIDTH)
+        for i in range(k)
+    ]
+
+    # Continuously produce the sum of these registers. This could be a
+    # reduction tree, but for now it's just a reduction "stick."
+    with topk.continuous:
+        last_add = regs[0].out
+        for i in range(1, k):
+            add = topk.add(f"sum{i}", WIDTH)
+            add.left = last_add
+            add.right = regs[i].out
+            last_add = add.out
+        topk.this().total = last_add
+
+    # Similarly, continuously compute the min and argmin of all our
+    # current values. There's a chance it would be better to wrap this
+    # up in a `comb group`, but it's not clear exactly where we would
+    # `with` it.
+    idx_width = k.bit_length()
+    with topk.group("argmin") as argmin:
+        last_val = regs[0].out
+        last_idx = 0
+        for i in range(1, k):
+            left_val = last_val
+            left_idx = last_idx
+
+            # Compare with the next register.
+            lt = topk.cell(f"lt{i}",
+                           ast.Stdlib().op("lt", WIDTH, signed=False))
+            lt.left = left_val
+            lt.right = regs[i].out
+
+            # Produce the resulting min and argmin.
+            val = topk.cell(f"val{i}",
+                            ast.Stdlib().op("wire", WIDTH, signed=False))
+            idx = topk.cell(f"idx{i}",
+                            ast.Stdlib().op("wire", idx_width, signed=False))
+            val.in_ = lt.out @ left_val
+            val.in_ = ~lt.out @ regs[i].out
+            idx.in_ = lt.out @ left_idx
+            idx.in_ = ~lt.out @ i
+
+            # Record the current wires for the next comparison.
+            last_val = val.out
+            last_idx = idx.out
+
+        # Write the results into registers.
+        min_val_reg = topk.reg("min_val_reg", WIDTH)
+        min_val_reg.write_en = 1
+        min_val_reg.in_ = last_val
+        min_idx_reg = topk.reg("min_idx_reg", idx_width)
+        min_idx_reg.write_en = 1
+        min_idx_reg.in_ = last_idx
+
+        argmin.done = (min_val_reg.done & min_idx_reg.done) @ 1
+
+    # Check whether the input value is bigger than the smallest stored
+    # value.
+    gt = topk.cell("gt", ast.Stdlib().op("gt", WIDTH, signed=False))
+    with topk.comb_group("check") as check:
+        gt.left = topk.this().value
+        gt.right = min_val_reg.out
+
+    # Replace the minimum value. Because we only have the index of the
+    # register we need, we need a bunch of conditional logic to write
+    # into the correct register.
+    done_expr = None
+    with topk.group("upd") as upd:
+        for i in range(k):
+            const_i = const(idx_width, i)
+            regs[i].write_en = (min_idx_reg.out == const_i) @ 1
+            regs[i].write_en = (min_idx_reg.out != const_i) @ 0
+            regs[i].in_ = (min_idx_reg.out == const_i) @ topk.this().value
+            done_part = (min_idx_reg.out == const_i) & regs[i].done
+            if done_expr:
+                done_expr |= done_part
+            else:
+                done_expr = done_part
+        upd.done = done_expr @ 1
+
+    # The control program.
+    topk.control += [
+        argmin,
+        if_(gt.out, check, upd),
+    ]
+
+    return topk
+
+
 if __name__ == '__main__':
-    build().emit()
+    build(
+        int(sys.argv[1]) if len(sys.argv) > 1 else 1
+    ).emit()

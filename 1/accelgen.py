@@ -205,15 +205,19 @@ def build_topk(prog: Builder, k: int):
     # Replace the minimum value. Because we only have the index of the
     # register we need, we need a bunch of conditional logic to write
     # into the correct register.
-    wdone = topk.cell("wdone", ast.Stdlib().op("wire", 1, signed=False))
+    done_expr = None
     with topk.group("upd") as upd:
         for i in range(k):
             const_i = const(idx_width, i)
             regs[i].write_en = (min_idx.out == const_i) @ 1
             regs[i].write_en = (min_idx.out != const_i) @ 0
             regs[i].in_ = (min_idx.out == const_i) @ topk.this().value
-            wdone.in_ = (min_idx.out == const_i) @ regs[i].done
-    upd.done = wdone.out
+            done_part = (min_idx.out == const_i) & regs[i].done
+            if done_expr:
+                done_expr |= done_part
+            else:
+                done_expr = done_part
+        upd.done = done_expr @ 1
 
     # The control program.
     topk.control += if_(gt.out, check, upd)

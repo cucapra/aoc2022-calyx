@@ -114,6 +114,7 @@ def build():
             accum_calories,
             incr,
         ]),
+        invoke(topk, in_value=accum.out),  # Count last elf.
         finish,
     ]
 

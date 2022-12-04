@@ -9,6 +9,7 @@ IDX_WIDTH = MAX_SIZE.bit_length()
 
 def build_mem(comp, name, width, size):
     idx_width = size.bit_length()
+    comp.prog.import_("primitives/memories.futil")
     inst = ast.CompInst("seq_mem_d1", [width, size, idx_width])
     return comp.cell(name, inst, is_external=True)
 

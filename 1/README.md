@@ -13,16 +13,20 @@ It was very helpful to use a Python generator instead of writing the Calyx IL di
 Simple quality-of-life advantages include interleaving cells and the groups that use them.
 It was also nice to be able to define Python constants for magic numbers (various sizes and widths).
 
+To solve part 2, we need to generalize a simple `max` operation to broader "top-k" functionality.
+This was probably the most interesting part of the Calyx implementation: we use a parameterized generator that takes a `k` and produces a little component that wraps `k` registers.
+You can think of many different ways to update the top `k` values, such as keeping a sorted list; we used a simple strategy that combinationally re-identifies the minimum value each time.
+It's not clear if this is wise at all, but it is kind of fun.
+
 To run the whole thing on the sample input, through Verilator:
 
-    make sample
+    make part1-sample
 
 To run on your special input, put it in a file called `full.txt` or something and then do:
 
-    make full
+    make part1-full
 
-The current implementation earns one star.
-For the second star, we'd need to implement some "top-k" comparison, which shouldn't be too hard.
-It would be entertaining, if not all that wise, to try to do this with some parallelism.
+That's for the first star.
+To earn the second star, use `part2-sample` or similar.
 
 [day1]: https://adventofcode.com/2022/day/1

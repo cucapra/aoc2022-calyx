@@ -1,3 +1,4 @@
+import sys
 from calyx.builder import Builder, while_, if_, invoke, const
 from calyx import py_ast as ast
 
@@ -12,7 +13,12 @@ def build_mem(comp, name, width, size):
     return comp.cell(name, inst, is_external=True)
 
 
-def build():
+def build(num_elves):
+    """Build the `main` function for AOC day 1.
+
+    `num_elves` is the number of elves whose total calorie count we will
+    maximize. Set to 1 for part 1 of the puzzle and 3 for part 2.
+    """
     prog = Builder()
     main = prog.component("main")
 
@@ -92,7 +98,7 @@ def build():
         new_elf_check.done = new_elf_reg.done
 
     # Machinery to track the top K elves.
-    topk_def = build_topk(prog, 3)  # TODO Should be a parameter.
+    topk_def = build_topk(prog, num_elves)
     topk = main.cell("topk", topk_def)
 
     # Publish the answer back to an interface memory.
@@ -151,16 +157,13 @@ def build_topk(prog: Builder, k: int):
     # Continuously produce the sum of these registers. This could be a
     # reduction tree, but for now it's just a reduction "stick."
     with topk.continuous:
-        last_add = None
+        last_add = regs[0].out
         for i in range(1, k):
             add = topk.add(f"sum{i}", WIDTH)
-            if last_add:
-                add.left = last_add.out
-            else:
-                add.left = regs[0].out
+            add.left = last_add
             add.right = regs[i].out
-            last_add = add
-        topk.this().total = last_add.out
+            last_add = add.out
+        topk.this().total = last_add
 
     # Similarly, continuously compute the min and argmin of all our
     # current values. There's a chance it would be better to wrap this
@@ -168,11 +171,11 @@ def build_topk(prog: Builder, k: int):
     # `with` it.
     idx_width = k.bit_length()
     with topk.group("argmin") as argmin:
-        last_val = None
-        last_idx = None
+        last_val = regs[0].out
+        last_idx = 0
         for i in range(1, k):
-            left_val = last_val.out if last_val else regs[0].out
-            left_idx = last_idx.out if last_idx else 0
+            left_val = last_val
+            left_idx = last_idx
 
             # Compare with the next register.
             lt = topk.cell(f"lt{i}",
@@ -191,16 +194,16 @@ def build_topk(prog: Builder, k: int):
             idx.in_ = ~lt.out @ i
 
             # Record the current wires for the next comparison.
-            last_val = val
-            last_idx = idx
+            last_val = val.out
+            last_idx = idx.out
 
         # Write the results into registers.
         min_val_reg = topk.reg("min_val_reg", WIDTH)
         min_val_reg.write_en = 1
-        min_val_reg.in_ = last_val.out
+        min_val_reg.in_ = last_val
         min_idx_reg = topk.reg("min_idx_reg", idx_width)
         min_idx_reg.write_en = 1
-        min_idx_reg.in_ = last_idx.out
+        min_idx_reg.in_ = last_idx
 
         argmin.done = (min_val_reg.done & min_idx_reg.done) @ 1
 
@@ -238,4 +241,6 @@ def build_topk(prog: Builder, k: int):
 
 
 if __name__ == '__main__':
-    build().emit()
+    build(
+        int(sys.argv[1]) if len(sys.argv) > 1 else 1
+    ).emit()

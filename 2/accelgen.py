@@ -1,4 +1,4 @@
-from calyx.builder import Builder, while_, if_, invoke, const
+from calyx.builder import Builder, while_, invoke, const
 from calyx import py_ast as ast
 
 WIDTH = 32
@@ -36,19 +36,20 @@ def build():
     # Inputs & outputs.
     them_mem = build_mem(main, "them", 2, MAX_SIZE)
     us_mem = build_mem(main, "us", 2, MAX_SIZE)
-    count = build_mem(main, "count", WIDTH, 1)
+    count = build_mem(main, "count", IDX_WIDTH, 1)
     answer = build_mem(main, "answer", WIDTH, 1)
 
     # Scoring subcomponent.
     scorer_def = build_scorer(prog)
     scorer = main.cell("scorer", scorer_def)
 
-    # Load a pair of moves.
+    # Load the pair of moves at `index`.
+    idx = main.reg("idx", IDX_WIDTH)
     with main.group("get_a_move") as get_a_move:
         them_mem.read_en = 1
-        them_mem.addr0 = 0
+        them_mem.addr0 = idx.out
         us_mem.read_en = 1
-        us_mem.addr0 = 0
+        us_mem.addr0 = idx.out
         get_a_move.done = (them_mem.read_done & us_mem.read_done) @ 1
 
     # Store the score for this move.
@@ -65,11 +66,39 @@ def build():
         answer.in_ = accum.out
         finish.done = answer.write_done
 
+    # Loop increment.
+    incr_add = main.add("incr_add", IDX_WIDTH)
+    with main.group("incr") as incr:
+        incr_add.left = idx.out
+        incr_add.right = 1
+        idx.write_en = 1
+        idx.in_ = incr_add.out
+        incr.done = idx.done
+
+    # Load the loop maximum for convenient access.
+    count_reg = main.reg("count_reg", IDX_WIDTH)
+    with main.group("init") as init:
+        count.read_en = 1
+        count.addr0 = 0
+        count_reg.write_en = count.read_done
+        count_reg.in_ = count.out
+        init.done = count_reg.done
+
+    # Loop control comparator.
+    lt = main.cell("lt", ast.Stdlib().op("lt", IDX_WIDTH, signed=False))
+    with main.comb_group("check") as check:
+        lt.left = idx.out
+        lt.right = count_reg.out
+
     # Control program.
     main.control += [
-        get_a_move,
-        invoke(scorer, in_them=them_mem.out, in_us=us_mem.out),
-        store_score,
+        init,
+        while_(lt.out, check, [
+            get_a_move,
+            invoke(scorer, in_them=them_mem.out, in_us=us_mem.out),
+            store_score,
+            incr,
+        ]),
         finish,
     ]
 

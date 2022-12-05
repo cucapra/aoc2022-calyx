@@ -85,12 +85,8 @@ def build_scorer(prog):
     # Look up shape score.
     shape_score = scorer.reg("shape_score", WIDTH)
     with scorer.group("get_shape_score") as get_shape_score:
-        shape_score_wire = scorer.cell(
-            "shape_score_wire",
-            ast.Stdlib().op("wire", WIDTH, signed=False),
-        )
-        assign_lut(SHAPE_SCORE, shape_score_wire, scorer.this().us)
-
+        shape_score_wire = build_lut(scorer, "shape_score",
+                                     SHAPE_SCORE, scorer.this().us)
         shape_score.write_en = 1
         shape_score.in_ = shape_score_wire.out
         get_shape_score.done = shape_score.done
@@ -104,11 +100,8 @@ def build_scorer(prog):
         cat.right = scorer.this().us
 
         # Look up the value.
-        outcome_score_wire = scorer.cell(
-            "outcome_score_wire",
-            ast.Stdlib().op("wire", WIDTH, signed=False),
-        )
-        assign_lut(gen_outcome_table(), outcome_score_wire, cat.out)
+        outcome_score_wire = build_lut(scorer, "outcome_score",
+                                       gen_outcome_table(), cat.out)
 
         # Write to the register.
         outcome_score.write_en = 1
@@ -148,12 +141,20 @@ def gen_outcome_table():
     return table
 
 
-def assign_lut(table, outcell, inport):
+def build_lut(comp, name, table, inport):
     """Generate assignments to implement a look-up table.
+
+    Return a wire component that has been assigned to produce the LUT's
+    output based on the value of `outport`.
     """
+    outwire = comp.cell(
+        f"{name}_lut",
+        ast.Stdlib().op("wire", WIDTH, signed=False),
+    )
     key_size = (len(table) - 1).bit_length()
     for (key, value) in enumerate(table):
-        outcell.in_ = (inport == const(key_size, key)) @ value
+        outwire.in_ = (inport == const(key_size, key)) @ value
+    return outwire
 
 
 if __name__ == '__main__':

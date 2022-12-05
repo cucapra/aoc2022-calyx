@@ -226,7 +226,7 @@ def gen_part2_table():
                 us = (them - 1) % 3
             else:
                 assert False, "unknown outcome"
-            idx = (them << 2) | us
+            idx = (them << 2) | outcome
             table[idx] = SHAPE_SCORE[us]
     return table
 

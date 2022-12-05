@@ -114,6 +114,19 @@ def build(part2):
     return prog.program
 
 
+def build_cat(comp, left, right, left_size, right_size):
+    """Build a `std_cat` component for concatenation.
+    """
+    cat = comp.cell(
+        "cat",
+        ast.CompInst("std_cat",
+                     [left_size, right_size, left_size + right_size]),
+    )
+    cat.left = left
+    cat.right = right
+    return cat
+
+
 def build_scorer(prog, part2):
     scorer = prog.component("scorer")
     scorer.input("them", 2)
@@ -131,15 +144,12 @@ def build_scorer(prog, part2):
                 scorer.this().us,
             )
         else:
-            cat = scorer.cell("cat",  ast.CompInst("std_cat", [2, 2, 4]))
-            cat.left = scorer.this().them
-            cat.right = scorer.this().us
-
             shape_score_wire = build_lut(
                 scorer,
                 "shape_score",
                 gen_part2_table(),
-                cat.out,
+                build_cat(scorer, scorer.this().them, scorer.this().us,
+                          2, 2).out,
             )
 
         shape_score.write_en = 1
@@ -150,17 +160,12 @@ def build_scorer(prog, part2):
     outcome_score = scorer.reg("outcome_score", WIDTH)
     with scorer.group("get_outcome_score") as get_outcome_score:
         if not part2:
-            # Concatenate the two moves to get the LUT's index.
-            cat = scorer.cell("cat",  ast.CompInst("std_cat", [2, 2, 4]))
-            cat.left = scorer.this().them
-            cat.right = scorer.this().us
-
-            # Look up the value.
             outcome_score_wire = build_lut(
                 scorer,
                 "outcome_score",
                 gen_outcome_table(),
-                cat.out,
+                build_cat(scorer, scorer.this().them, scorer.this().us,
+                          2, 2).out,
             )
         else:
             outcome_score_wire = build_lut(

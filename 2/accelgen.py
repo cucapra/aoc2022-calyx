@@ -1,3 +1,4 @@
+import sys
 from calyx.builder import Builder, while_, invoke, const
 from calyx import py_ast as ast
 
@@ -5,9 +6,9 @@ WIDTH = 32
 MAX_SIZE = 4096
 IDX_WIDTH = MAX_SIZE.bit_length()
 
-ROCK = 0
-PAPER = 1
-SCISSORS = 2
+ROCK = LOSE = 0  # A, X
+PAPER = DRAW = 1  # B, Y
+SCISSORS = WIN = 2  # C, Z
 
 WINS = {
     (ROCK, SCISSORS),
@@ -27,8 +28,12 @@ def build_mem(comp, name, width, size, is_external=True, is_ref=False):
     return comp.cell(name, inst, is_external=is_external, is_ref=is_ref)
 
 
-def build():
+def build(part2):
     """Build the `main` component for AOC day 2.
+
+    `part` is a flag indicating whether we're doing Part 2, with the
+    revised strategy guide interpretation. Otherwise, we're doing Part
+    1, with the original/straightforward interpretation.
     """
     prog = Builder()
     main = prog.component("main")
@@ -40,7 +45,7 @@ def build():
     answer = build_mem(main, "answer", WIDTH, 1)
 
     # Scoring subcomponent.
-    scorer_def = build_scorer(prog)
+    scorer_def = build_scorer(prog, part2)
     scorer = main.cell("scorer", scorer_def)
 
     # Load the pair of moves at `index`.
@@ -109,7 +114,7 @@ def build():
     return prog.program
 
 
-def build_scorer(prog):
+def build_scorer(prog, part2):
     scorer = prog.component("scorer")
     scorer.input("them", 2)
     scorer.input("us", 2)
@@ -118,23 +123,52 @@ def build_scorer(prog):
     # Look up shape score.
     shape_score = scorer.reg("shape_score", WIDTH)
     with scorer.group("get_shape_score") as get_shape_score:
-        shape_score_wire = build_lut(scorer, "shape_score",
-                                     SHAPE_SCORE, scorer.this().us)
+        if not part2:
+            shape_score_wire = build_lut(
+                scorer,
+                "shape_score",
+                SHAPE_SCORE,
+                scorer.this().us,
+            )
+        else:
+            cat = scorer.cell("cat",  ast.CompInst("std_cat", [2, 2, 4]))
+            cat.left = scorer.this().them
+            cat.right = scorer.this().us
+
+            shape_score_wire = build_lut(
+                scorer,
+                "shape_score",
+                gen_part2_table(),
+                cat.out,
+            )
+
         shape_score.write_en = 1
         shape_score.in_ = shape_score_wire.out
         get_shape_score.done = shape_score.done
 
     # Same for outcome score.
     outcome_score = scorer.reg("outcome_score", WIDTH)
-    cat = scorer.cell("cat",  ast.CompInst("std_cat", [2, 2, 4]))
     with scorer.group("get_outcome_score") as get_outcome_score:
-        # Concatenate the two moves to get the LUT's index.
-        cat.left = scorer.this().them
-        cat.right = scorer.this().us
+        if not part2:
+            # Concatenate the two moves to get the LUT's index.
+            cat = scorer.cell("cat",  ast.CompInst("std_cat", [2, 2, 4]))
+            cat.left = scorer.this().them
+            cat.right = scorer.this().us
 
-        # Look up the value.
-        outcome_score_wire = build_lut(scorer, "outcome_score",
-                                       gen_outcome_table(), cat.out)
+            # Look up the value.
+            outcome_score_wire = build_lut(
+                scorer,
+                "outcome_score",
+                gen_outcome_table(),
+                cat.out,
+            )
+        else:
+            outcome_score_wire = build_lut(
+                scorer,
+                "outcome_score",
+                [LOSE_SCORE, DRAW_SCORE, WIN_SCORE],
+                scorer.this().us,
+            )
 
         # Write to the register.
         outcome_score.write_en = 1
@@ -174,6 +208,29 @@ def gen_outcome_table():
     return table
 
 
+def gen_part2_table():
+    """Generate a look-up table for shape scores in part 2.
+
+    The key is the 4-bit pair of "their" move and the desired outcome
+    (LOSE, DRAW, or WIN). We pick the appropriate move and look up its
+    score value.
+    """
+    table = [0] * (2 ** 4)
+    for them in (ROCK, PAPER, SCISSORS):
+        for outcome in (LOSE, DRAW, WIN):
+            if outcome == DRAW:
+                us = them
+            elif outcome == WIN:
+                us = (them + 1) % 3
+            elif outcome == LOSE:
+                us = (them - 1) % 3
+            else:
+                assert False, "unknown outcome"
+            idx = (them << 2) | us
+            table[idx] = SHAPE_SCORE[us]
+    return table
+
+
 def build_lut(comp, name, table, inport):
     """Generate assignments to implement a look-up table.
 
@@ -191,4 +248,6 @@ def build_lut(comp, name, table, inport):
 
 
 if __name__ == '__main__':
-    build().emit()
+    build(
+        sys.argv[1] == 'part2' if len(sys.argv) > 1 else False
+    ).emit()

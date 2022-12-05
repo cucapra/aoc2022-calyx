@@ -1,10 +1,23 @@
-import sys
 from calyx.builder import Builder, while_, if_, invoke, const
 from calyx import py_ast as ast
 
 WIDTH = 32
 MAX_SIZE = 4096
 IDX_WIDTH = MAX_SIZE.bit_length()
+
+ROCK = 0
+PAPER = 1
+SCISSORS = 2
+
+WINS = {
+    (ROCK, SCISSORS),
+    (PAPER, ROCK),
+    (SCISSORS, PAPER),
+}
+SHAPE_SCORE = [1, 2, 3]
+LOSE_SCORE = 0
+DRAW_SCORE = 3
+WIN_SCORE = 6
 
 
 def build_mem(comp, name, width, size, is_external=True, is_ref=False):
@@ -73,21 +86,12 @@ def build_scorer(prog):
     scorer.input("us", 2)
     scorer.output("score", WIDTH)
 
-    # Memory references to LUTs.
-    outcome_score_lut = build_mem(scorer, "outcome_score_lut", WIDTH, 2 ** 4,
-                                  is_external=False, is_ref=True)
-    shape_score_lut = build_mem(scorer, "shape_score_lut", WIDTH, 3,
-                                is_external=False, is_ref=True)
-
-    # Look up shape score. Registering the output of a sequential memory
-    # seems a little redundant, but it seems necessary to stabilize the
-    # result for subsequent use? Not sure. TODO REMOVE
+    # Look up shape score.
     shape_score = scorer.reg("shape_score", WIDTH)
     with scorer.group("get_shape_score") as get_shape_score:
-        shape_score_lut.read_en = 1
-        shape_score_lut.addr = scorer.this().us
-        shape_score.write_en = shape_score_lut.done
-        shape_score.in_ = shape_score_lut.out
+        shape_score.write_en = 1
+        for asgn in assign_lut(SHAPE_SCORE, scorer.this().us):
+            shape_score.in_ = asgn
         get_shape_score.done = shape_score.done
 
     # Same for outcome score.
@@ -99,10 +103,9 @@ def build_scorer(prog):
         cat.right = scorer.this().us
 
         # Look up the value.
-        outcome_score_lut.read_en = 1
-        outcome_score_lut.addr = cat.out
-        outcome_score.write_en = outcome_score_lut.done
-        outcome_score.in_ = outcome_score_lut.out
+        outcome_score.write_en = 1
+        for asgn in assign_lut(gen_outcome_table(), cat.out):
+            outcome_score.in_ = asgn
         get_outcome_score.done = outcome_score.done
 
     # Continuously produce the total score.
@@ -116,6 +119,34 @@ def build_scorer(prog):
     scorer.control += {get_shape_score, get_outcome_score}
 
     return scorer
+
+
+def gen_outcome_table():
+    """Generate a look-up table for outcome scores.
+
+    The table is indexed by the 4-bit *concatenated pair* of "their"
+    move and "our" move.
+    """
+    table = [0] * (2 ** 4)
+    for them in (ROCK, PAPER, SCISSORS):
+        for us in (ROCK, PAPER, SCISSORS):
+            idx = (them << 2) | us
+            if us == them:
+                score = DRAW_SCORE
+            elif (us, them) in WINS:
+                score = WIN_SCORE
+            else:
+                score = LOSE_SCORE
+            table[idx] = score
+    return table
+
+
+def assign_lut(table, inport):
+    """Generate assignments to implement a look-up table.
+    """
+    key_size = (len(table) - 1).bit_length()
+    for (key, value) in enumerate(table):
+        yield (inport == const(key_size, key)) @ value
 
 
 if __name__ == '__main__':

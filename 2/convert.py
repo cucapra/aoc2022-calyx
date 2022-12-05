@@ -3,14 +3,6 @@
 We encode Rock (A & X), Paper (B & Y), and Scissors (C & Z) into 2-bit
 numbers (0, 1, and 2). Then there are just two memories of equal length:
 "them" moves and "us" moves.
-
-We also include look-up tables for two scoring functions: one for the
-shape (indexed by the raw, two-bit rock/paper/scissors value) and one
-for the outcome (indexed by the 4-bit *concatenated pair* of "their"
-move and "our" move). It's possible this could be a lot more efficient
-if we instructed the generated Verilog that these are ROMs, to be baked
-into the design, rather than actual writable RAMs---but that's for
-another day.
 """
 import sys
 import json
@@ -32,16 +24,6 @@ US_NUMS = {
     "Y": PAPER,
     "Z": SCISSORS,
 }
-
-WINS = {
-    (ROCK, SCISSORS),
-    (PAPER, ROCK),
-    (SCISSORS, PAPER),
-}
-SHAPE_SCORE = [1, 2, 3]
-LOSE_SCORE = 0
-DRAW_SCORE = 3
-WIN_SCORE = 6
 
 
 def convert(infile):
@@ -95,40 +77,7 @@ def convert(infile):
                 "width": WIDTH,
             },
         },
-
-        # Look-up table ROMs.
-        "outcome_score": {
-            "data": gen_outcome_table(),
-            "format": {
-                "numeric_type": "bitnum",
-                "is_signed": False,
-                "width": WIDTH,
-            },
-        },
-        "shape_score": {
-            "data": SHAPE_SCORE,
-            "format": {
-                "numeric_type": "bitnum",
-                "is_signed": False,
-                "width": WIDTH,
-            },
-        },
     }
-
-
-def gen_outcome_table():
-    table = [0] * (2 ** 4)
-    for them in (ROCK, PAPER, SCISSORS):
-        for us in (ROCK, PAPER, SCISSORS):
-            idx = (them << 2) | us
-            if us == them:
-                score = DRAW_SCORE
-            elif (us, them) in WINS:
-                score = WIN_SCORE
-            else:
-                score = LOSE_SCORE
-            table[idx] = score
-    return table
 
 
 if __name__ == "__main__":

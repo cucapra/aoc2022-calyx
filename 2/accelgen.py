@@ -39,10 +39,6 @@ def build():
     count = build_mem(main, "count", WIDTH, 1)
     answer = build_mem(main, "answer", WIDTH, 1)
 
-    # Scoring look-up tables.
-    outcome_score = build_mem(main, "outcome_score", WIDTH, 2 ** 4)
-    shape_score = build_mem(main, "shape_score", WIDTH, 3)
-
     # Scoring subcomponent.
     scorer_def = build_scorer(prog)
     scorer = main.cell("topk", scorer_def)

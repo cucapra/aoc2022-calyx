@@ -41,7 +41,7 @@ def build():
 
     # Scoring subcomponent.
     scorer_def = build_scorer(prog)
-    scorer = main.cell("topk", scorer_def)
+    scorer = main.cell("scorer", scorer_def)
 
     # Load a pair of moves.
     with main.group("get_a_move") as get_a_move:
@@ -85,9 +85,14 @@ def build_scorer(prog):
     # Look up shape score.
     shape_score = scorer.reg("shape_score", WIDTH)
     with scorer.group("get_shape_score") as get_shape_score:
+        shape_score_wire = scorer.cell(
+            "shape_score_wire",
+            ast.Stdlib().op("wire", WIDTH, signed=False),
+        )
+        assign_lut(SHAPE_SCORE, shape_score_wire, scorer.this().us)
+
         shape_score.write_en = 1
-        for asgn in assign_lut(SHAPE_SCORE, scorer.this().us):
-            shape_score.in_ = asgn
+        shape_score.in_ = shape_score_wire.out
         get_shape_score.done = shape_score.done
 
     # Same for outcome score.
@@ -99,9 +104,15 @@ def build_scorer(prog):
         cat.right = scorer.this().us
 
         # Look up the value.
+        outcome_score_wire = scorer.cell(
+            "outcome_score_wire",
+            ast.Stdlib().op("wire", WIDTH, signed=False),
+        )
+        assign_lut(gen_outcome_table(), outcome_score_wire, cat.out)
+
+        # Write to the register.
         outcome_score.write_en = 1
-        for asgn in assign_lut(gen_outcome_table(), cat.out):
-            outcome_score.in_ = asgn
+        outcome_score.in_ = outcome_score_wire.out
         get_outcome_score.done = outcome_score.done
 
     # Continuously produce the total score.
@@ -137,12 +148,12 @@ def gen_outcome_table():
     return table
 
 
-def assign_lut(table, inport):
+def assign_lut(table, outcell, inport):
     """Generate assignments to implement a look-up table.
     """
     key_size = (len(table) - 1).bit_length()
     for (key, value) in enumerate(table):
-        yield (inport == const(key_size, key)) @ value
+        outcell.in_ = (inport == const(key_size, key)) @ value
 
 
 if __name__ == '__main__':

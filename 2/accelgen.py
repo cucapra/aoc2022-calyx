@@ -54,10 +54,14 @@ def build():
 
     # Store the score for this move.
     accum = main.reg("accum", WIDTH)
-    with main.group("store_score") as store_score:
+    add = main.add("add", WIDTH)
+    with main.group("accum_score") as accum_score:
+        add.left = accum.out
+        add.right = scorer.score
+
         accum.write_en = 1
-        accum.in_ = scorer.score
-        store_score.done = accum.done
+        accum.in_ = add.out
+        accum_score.done = accum.done
 
     # Publish the answer back to an interface memory.
     with main.group("finish") as finish:
@@ -96,7 +100,7 @@ def build():
         while_(lt.out, check, [
             get_a_move,
             invoke(scorer, in_them=them_mem.out, in_us=us_mem.out),
-            store_score,
+            accum_score,
             incr,
         ]),
         finish,

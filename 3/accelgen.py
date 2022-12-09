@@ -222,17 +222,23 @@ def build_filter(prog, width):
         idx.in_ = add.out
         incr.done = idx.done
 
-    # Clear loop: bounds check.
-    lt = filter.cell("lt", ast.Stdlib().op("lt", width, signed=False))
+    # Clear loop: bounds check. This turns out to be REALLY ANNOYING
+    # because we want the bounds check to look like `idx < 64`, but we
+    # *also* want `idx` to be a 6-bit value. So we have to rely on
+    # overflow and check whether it's zero, and unroll the first
+    # iteration?? Weird.
+    neq = filter.cell("neq", ast.Stdlib().op("neq", width, signed=False))
     with filter.comb_group("check") as check:
-        lt.left = idx.out
-        lt.right = 60  # TODO
+        neq.left = idx.out
+        neq.right = 0
 
     filter.control += \
         if_(filter.this().clear, None, [
                 # Iteratively clear everything in the filter.
                 clear_init,
-                while_(lt.out, check, [
+                clear_idx,
+                incr,
+                while_(neq.out, check, [
                     clear_idx,
                     incr,
                 ]),

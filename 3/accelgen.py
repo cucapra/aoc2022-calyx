@@ -1,4 +1,4 @@
-from calyx.builder import Builder, while_, if_
+from calyx.builder import Builder, while_, if_, const, invoke
 from calyx import py_ast as ast
 
 MAX_CONTENTS = 16384
@@ -7,11 +7,12 @@ ITEM_WIDTH = 6
 LENGTH_WIDTH = 8
 SCORE_WIDTH = 32
 
-RUCKSACK_IDX_WIDTH = MAX_RUCKSACKS.bit_length()
+RUCKSACK_IDX_WIDTH = (MAX_RUCKSACKS - 1).bit_length()
+CONTENTS_IDX_WIDTH = (MAX_CONTENTS - 1).bit_length()
 
 
 def build_mem(comp, name, width, size, is_external=True, is_ref=False):
-    idx_width = size.bit_length()
+    idx_width = (size - 1).bit_length() if size > 1 else 1
     comp.prog.import_("primitives/memories.futil")
     inst = ast.CompInst("seq_mem_d1", [width, size, idx_width])
     return comp.cell(name, inst, is_external=is_external, is_ref=is_ref)
@@ -67,20 +68,20 @@ def build():
         init_items.done = items.done
 
     # Reset the contents loop counter.
-    item = main.reg("item", LENGTH_WIDTH)
+    item_idx = main.reg("item_idx", LENGTH_WIDTH)
     with main.group("reset_item") as reset_item:
-        item.write_en = 1
-        item.in_ = 0
-        reset_item.done = item.done
+        item_idx.write_en = 1
+        item_idx.in_ = 0
+        reset_item.done = item_idx.done
 
     # Increment for the item loop.
     item_add = main.add("item_add", LENGTH_WIDTH)
     with main.group("incr_item") as incr_item:
-        item_add.left = item.out
+        item_add.left = item_idx.out
         item_add.right = 1
-        item.write_en = 1
-        item.in_ = item_add.out
-        incr_item.done = item.done
+        item_idx.write_en = 1
+        item_idx.in_ = item_add.out
+        incr_item.done = item_idx.done
 
     # Exit check for item loop.
     item_lt = main.cell(
@@ -88,19 +89,51 @@ def build():
         ast.Stdlib().op("lt", LENGTH_WIDTH, signed=False),
     )
     with main.comb_group("check_item") as check_item:
-        item_lt.left = item.out
+        item_lt.left = item_idx.out
         item_lt.right = items.out
 
+    # Increment for the *global* item index.
+    global_item_idx = main.reg("global_item_idx", CONTENTS_IDX_WIDTH)
+    global_item_add = main.add("global_item_add", CONTENTS_IDX_WIDTH)
+    with main.group("incr_global_item") as incr_global_item:
+        global_item_add.left = global_item_idx.out
+        global_item_add.right = 1
+        global_item_idx.write_en = 1
+        global_item_idx.in_ = global_item_add.out
+        incr_global_item.done = global_item_idx.done
+
+    # Load the actual item value from rucksack contents.
+    item = main.reg("item", ITEM_WIDTH)
+    with main.group("load_item") as load_item:
+        contents.read_en = 1
+        contents.addr0 = global_item_idx.out
+        item.write_en = contents.read_done
+        item.in_ = contents.out
+        load_item.done = item.done
+
     # Filter subcomponent.
-    build_filter(prog, ITEM_WIDTH)
+    filter_def = build_filter(prog, ITEM_WIDTH)
+    filter = main.cell("filter", filter_def)
 
     main.control += [
         init_rucksack,
         while_(rucksack_lt.out, check_rucksack, [
+            # First compartment.
             {init_items, reset_item},
             while_(item_lt.out, check_item, [
-                incr_item,
+                load_item,
+                invoke(filter, in_value=item.out, in_set=const(1, 1)),
+                {incr_item, incr_global_item},
             ]),
+
+            # Second compartment.
+            reset_item,
+            while_(item_lt.out, check_item, [
+                load_item,
+                invoke(filter, in_value=item.out, in_set=const(1, 0)),
+                {incr_item, incr_global_item},
+            ]),
+
             incr_rucksack,
         ]),
     ]

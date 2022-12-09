@@ -170,14 +170,13 @@ def build():
     main.control += [
         init_rucksack,
         while_(rucksack_lt.out, check_rucksack, [
-            save_next,
-
             # Reset the filter.
             invoke(filter, in_value=item.out, in_set=const(1, 1),
                    in_clear=const(1, 1)),
 
             # First compartment.
             {init_items, reset_item},
+            save_next,
             while_(item_lt.out, check_item, [
                 load_item,
                 invoke(filter, in_value=item.out, in_set=const(1, 1),

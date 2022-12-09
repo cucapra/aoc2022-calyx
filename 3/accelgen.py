@@ -83,7 +83,7 @@ def build():
         item_idx.in_ = item_add.out
         incr_item.done = item_idx.done
 
-    # Exit check for item loop.
+    # Exit check for *first* item loop.
     item_lt = main.cell(
         "item_lt",
         ast.Stdlib().op("lt", LENGTH_WIDTH, signed=False),
@@ -114,6 +114,16 @@ def build():
     # Filter subcomponent.
     filter_def = build_filter(prog, ITEM_WIDTH)
     filter = main.cell("filter", filter_def)
+
+    # Exit check for *second* item loop, when we need an early exit
+    # after the first collision is found.
+    break_cond = main.cell("break_cond",
+                           ast.Stdlib().op("wire", 1, signed=False))
+    with main.comb_group("check_item_break") as check_item_break:
+        item_lt.left = item_idx.out
+        item_lt.right = items.out
+        break_cond.in_ = (item_lt.out & ~filter.present) @ 1
+        break_cond.in_ = ~(item_lt.out & ~filter.present) @ 0
 
     # Accumulator for duplicate item priorities.
     accum = main.reg("accum", SCORE_WIDTH)
@@ -152,7 +162,7 @@ def build():
 
             # Second compartment.
             reset_item,
-            while_(item_lt.out, check_item, [
+            while_(break_cond.out, check_item_break, [
                 load_item,
                 invoke(filter, in_value=item.out, in_set=const(1, 0),
                        in_clear=const(1, 0)),
@@ -233,6 +243,12 @@ def build_filter(prog, width):
         neq.left = idx.out
         neq.right = 0
 
+    # Clear the output register.
+    with filter.group("clear_present") as clear_present:
+        present_reg.write_en = 1
+        present_reg.in_ = 0
+        clear_present.done = present_reg.done
+
     filter.control += \
         if_(filter.this().clear, None, [
                 # Iteratively clear everything in the filter.
@@ -243,6 +259,7 @@ def build_filter(prog, width):
                     clear_idx,
                     incr,
                 ]),
+                clear_present,
             ], if_(filter.this().set, None,
                    set_marker,
                    check_marker))

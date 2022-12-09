@@ -28,7 +28,7 @@ def convert(infile):
         line = line.strip()
         vals = [char2pri(c) for c in line]
         contents += vals
-        lengths.append(len(vals) / 2)
+        lengths.append(len(vals) // 2)
 
     assert len(contents) <= MAX_CONTENTS
 

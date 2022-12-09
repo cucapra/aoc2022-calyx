@@ -25,8 +25,8 @@ def build():
     main = prog.component("main")
 
     # Inputs & outputs.
-    contents = build_mem(main, "contents", 2, MAX_CONTENTS)
-    lengths = build_mem(main, "lengths", 2, MAX_RUCKSACKS)
+    contents = build_mem(main, "contents", ITEM_WIDTH, MAX_CONTENTS)
+    lengths = build_mem(main, "lengths", LENGTH_WIDTH, MAX_RUCKSACKS)
     rucksacks = build_mem(main, "rucksacks", RUCKSACK_IDX_WIDTH, 1)
     answer = build_mem(main, "answer", SCORE_WIDTH, 1)
 
@@ -58,9 +58,47 @@ def build():
         rucksack_lt.left = rucksack_idx.out
         rucksack_lt.right = rucksacks_reg.out
 
+    # Register for the contents loop limit.
+    items = main.reg("items", LENGTH_WIDTH)
+    with main.group("init_items") as init_items:
+        lengths.read_en = 1
+        lengths.addr0 = rucksack_idx.out
+        items.write_en = lengths.read_done
+        items.in_ = lengths.out
+        init_items.done = items.done
+
+    # Reset the contents loop counter.
+    item = main.reg("item", LENGTH_WIDTH)
+    with main.group("reset_item") as reset_item:
+        item.write_en = 1
+        item.in_ = 0
+        reset_item.done = item.done
+
+    # Increment for the item loop.
+    item_add = main.add("item_add", LENGTH_WIDTH)
+    with main.group("incr_item") as incr_item:
+        item_add.left = item.out
+        item_add.right = 1
+        item.write_en = 1
+        item.in_ = item_add.out
+        incr_item.done = item.done
+
+    # Exit check for item loop.
+    item_lt = main.cell(
+        "item_lt",
+        ast.Stdlib().op("lt", LENGTH_WIDTH, signed=False),
+    )
+    with main.comb_group("check_item") as check_item:
+        item_lt.left = item.out
+        item_lt.right = items.out
+
     main.control += [
         init_rucksack,
         while_(rucksack_lt.out, check_rucksack, [
+            {init_items, reset_item},
+            while_(item_lt.out, check_item, [
+                incr_item,
+            ]),
             incr_rucksack,
         ]),
     ]

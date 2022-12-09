@@ -194,8 +194,8 @@ def build_filter(prog, width):
         filter.this().present = present_reg.out
 
     filter.control += if_(filter.this().set, None,
-                          check_marker,
-                          set_marker)
+                          set_marker,
+                          check_marker)
 
     return filter
 

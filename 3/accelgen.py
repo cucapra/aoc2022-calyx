@@ -102,6 +102,29 @@ def build():
         global_item_idx.in_ = global_item_add.out
         incr_global_item.done = global_item_idx.done
 
+    # Save the *next* global start index at the beginning of the
+    # outer loop: `next_idx = idx + 2 * items`
+    next_idx = main.reg("next_idx", CONTENTS_IDX_WIDTH)
+    pad = main.cell("pad_idx", ast.CompInst("std_pad", [LENGTH_WIDTH,
+                                                        CONTENTS_IDX_WIDTH]))
+    double = main.add("double", CONTENTS_IDX_WIDTH)
+    jump_add = main.add("jump_add", CONTENTS_IDX_WIDTH)
+    with main.group("save_next") as save_next:
+        jump_add.left = global_item_idx.out
+        pad.in_ = items.out
+        double.left = pad.out
+        double.right = pad.out
+        jump_add.right = double.out
+        next_idx.write_en = 1
+        next_idx.in_ = jump_add.out
+        save_next.done = next_idx.done
+
+    # "Jump" to the start of the next rucksack in the contents memory.
+    with main.group("jump_global_item") as jump_global_item:
+        global_item_idx.write_en = 1
+        global_item_idx.in_ = next_idx.out
+        jump_global_item.done = global_item_idx.done
+
     # Load the actual item value from rucksack contents.
     item = main.reg("item", ITEM_WIDTH)
     with main.group("load_item") as load_item:
@@ -147,6 +170,8 @@ def build():
     main.control += [
         init_rucksack,
         while_(rucksack_lt.out, check_rucksack, [
+            save_next,
+
             # Reset the filter.
             invoke(filter, in_value=item.out, in_set=const(1, 1),
                    in_clear=const(1, 1)),
@@ -172,7 +197,7 @@ def build():
                 {incr_item, incr_global_item},
             ]),
 
-            incr_rucksack,
+            {incr_rucksack, jump_global_item},
         ]),
         finish,
     ]

@@ -137,11 +137,15 @@ def build():
     main.control += [
         init_rucksack,
         while_(rucksack_lt.out, check_rucksack, [
+            # Reset the filter.
+            invoke(filter, in_clear=const(1, 1)),
+
             # First compartment.
             {init_items, reset_item},
             while_(item_lt.out, check_item, [
                 load_item,
-                invoke(filter, in_value=item.out, in_set=const(1, 1)),
+                invoke(filter, in_value=item.out, in_set=const(1, 1),
+                       in_clear=const(1, 0)),
                 {incr_item, incr_global_item},
             ]),
 
@@ -149,7 +153,8 @@ def build():
             reset_item,
             while_(item_lt.out, check_item, [
                 load_item,
-                invoke(filter, in_value=item.out, in_set=const(1, 0)),
+                invoke(filter, in_value=item.out, in_set=const(1, 0),
+                       in_clear=const(1, 0)),
                 if_(filter.present, None, [
                     accum_priority,
                 ]),
@@ -169,6 +174,7 @@ def build_filter(prog, width):
 
     filter.input("value", width)
     filter.input("set", 1)
+    filter.input("clear", 1)
     filter.output("present", 1)
 
     markers = build_mem(filter, "markers", 1, 2 ** width, is_external=False)
@@ -193,9 +199,46 @@ def build_filter(prog, width):
     with filter.continuous:
         filter.this().present = present_reg.out
 
-    filter.control += if_(filter.this().set, None,
-                          set_marker,
-                          check_marker)
+    # Clear loop: initialize.
+    idx = filter.reg("idx", width)
+    with filter.group("clear_init") as clear_init:
+        idx.write_en = 1
+        idx.in_ = 0
+        clear_init.done = idx.done
+
+    # Clear loop: body.
+    with filter.group("clear_idx") as clear_idx:
+        markers.write_en = 1
+        markers.addr0 = idx.out
+        markers.in_ = 0
+        clear_idx.done = markers.write_done
+
+    # Clear loop: increment.
+    add = filter.add("add", width)
+    with filter.group("incr") as incr:
+        add.left = idx.out
+        add.right = 1
+        idx.write_en = 1
+        idx.in_ = add.out
+        incr.done = idx.done
+
+    # Clear loop: bounds check.
+    lt = filter.cell("lt", ast.Stdlib().op("lt", width, signed=False))
+    with filter.comb_group("check") as check:
+        lt.left = idx.out
+        lt.right = 60  # TODO
+
+    filter.control += \
+        if_(filter.this().clear, None, [
+                # Iteratively clear everything in the filter.
+                clear_init,
+                while_(lt.out, check, [
+                    clear_idx,
+                    incr,
+                ]),
+            ], if_(filter.this().set, None,
+                   set_marker,
+                   check_marker))
 
     return filter
 

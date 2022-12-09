@@ -127,6 +127,13 @@ def build():
         accum.in_ = accum_add.out
         accum_priority.done = accum.done
 
+    # Publish result back to interface memory.
+    with main.group("finish") as finish:
+        answer.write_en = 1
+        answer.addr0 = 0
+        answer.in_ = accum.out
+        finish.done = answer.write_done
+
     main.control += [
         init_rucksack,
         while_(rucksack_lt.out, check_rucksack, [
@@ -151,6 +158,7 @@ def build():
 
             incr_rucksack,
         ]),
+        finish,
     ]
 
     return prog.program

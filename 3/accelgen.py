@@ -138,7 +138,8 @@ def build():
         init_rucksack,
         while_(rucksack_lt.out, check_rucksack, [
             # Reset the filter.
-            invoke(filter, in_clear=const(1, 1)),
+            invoke(filter, in_value=item.out, in_set=const(1, 1),
+                   in_clear=const(1, 1)),
 
             # First compartment.
             {init_items, reset_item},
@@ -184,7 +185,7 @@ def build_filter(prog, width):
     with filter.group("check_marker") as check_marker:
         markers.read_en = 1
         markers.addr0 = filter.this().value
-        present_reg.write_en = 1
+        present_reg.write_en = markers.read_done
         present_reg.in_ = markers.out
         check_marker.done = present_reg.done
 

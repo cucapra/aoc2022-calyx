@@ -115,6 +115,18 @@ def build():
     filter_def = build_filter(prog, ITEM_WIDTH)
     filter = main.cell("filter", filter_def)
 
+    # Accumulator for duplicate item priorities.
+    accum = main.reg("accum", SCORE_WIDTH)
+    accum_add = main.add("accum_add", SCORE_WIDTH)
+    pad = main.cell("pad", ast.CompInst("std_pad", [ITEM_WIDTH, SCORE_WIDTH]))
+    with main.group("accum_priority") as accum_priority:
+        accum_add.left = accum.out
+        pad.in_ = item.out
+        accum_add.right = pad.out
+        accum.write_en = 1
+        accum.in_ = accum_add.out
+        accum_priority.done = accum.done
+
     main.control += [
         init_rucksack,
         while_(rucksack_lt.out, check_rucksack, [
@@ -131,6 +143,9 @@ def build():
             while_(item_lt.out, check_item, [
                 load_item,
                 invoke(filter, in_value=item.out, in_set=const(1, 0)),
+                if_(filter.present, None, [
+                    accum_priority,
+                ]),
                 {incr_item, incr_global_item},
             ]),
 

@@ -1,5 +1,4 @@
-import sys
-from calyx.builder import Builder, while_, invoke, const
+from calyx.builder import Builder, while_, if_
 from calyx import py_ast as ast
 
 MAX_CONTENTS = 16384
@@ -92,6 +91,9 @@ def build():
         item_lt.left = item.out
         item_lt.right = items.out
 
+    # Filter subcomponent.
+    build_filter(prog, ITEM_WIDTH)
+
     main.control += [
         init_rucksack,
         while_(rucksack_lt.out, check_rucksack, [
@@ -104,6 +106,42 @@ def build():
     ]
 
     return prog.program
+
+
+def build_filter(prog, width):
+    filter = prog.component("filter")
+
+    filter.input("value", width)
+    filter.input("set", 1)
+    filter.output("present", 1)
+
+    markers = build_mem(filter, "markers", 1, 2 ** width, is_external=False)
+
+    # Check whether the value has been seen before.
+    present_reg = filter.reg("present_reg", 1)
+    with filter.group("check_marker") as check_marker:
+        markers.read_en = 1
+        markers.addr0 = filter.this().value
+        present_reg.write_en = 1
+        present_reg.in_ = markers.out
+        check_marker.done = present_reg.done
+
+    # Mark the value as seen.
+    with filter.group("set_marker") as set_marker:
+        markers.write_en = 1
+        markers.addr0 = filter.this().value
+        markers.in_ = 1
+        set_marker.done = markers.write_done
+
+    # Connect output register to output.
+    with filter.continuous:
+        filter.this().present = present_reg.out
+
+    filter.control += if_(filter.this().set, None,
+                          check_marker,
+                          set_marker)
+
+    return filter
 
 
 if __name__ == '__main__':

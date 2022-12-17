@@ -195,13 +195,15 @@ def build(rucksacks_per_team=1):
     # Control fragment: a loop to *populate* a filter (i.e., mark
     # contents but don't check them).
     def populate_loop(filt):
-        reset_item,
-        return while_(item_lt.out, check_item, [
-            load_item,
-            invoke(filt, in_value=item.out, in_set=const(1, 1),
-                   in_clear=const(1, 0)),
-            {incr_item, incr_global_item},
-        ])
+        return [
+            reset_item,
+            while_(item_lt.out, check_item, [
+                load_item,
+                invoke(filt, in_value=item.out, in_set=const(1, 1),
+                       in_clear=const(1, 0)),
+                {incr_item, incr_global_item},
+            ]),
+        ]
 
     # Control fragment: a loop to *check* the filter, aborting early if
     # we find a collision.

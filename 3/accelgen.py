@@ -1,3 +1,4 @@
+from functools import reduce
 from calyx.builder import Builder, while_, if_, const, invoke
 from calyx import py_ast as ast
 
@@ -163,6 +164,20 @@ def build(rucksacks_per_team=1):
         for i in range(num_filters)
     ]
 
+    # A continuous, combinational computation for the conjunction of all
+    # filters: i.e., whether the current index is present in *all*
+    # filters. (This could be encapsulated in a `comb group`, but we
+    # actually want to use it in the context of a different `comb group`
+    # that builds on it... weird! Overall, I don't like this Calyx code
+    # very much... I would almost prefer a structural `std_and` tree.)
+    all_present = main.cell("all_present",
+                            ast.Stdlib().op("wire", 1, signed=False))
+    all_present_cond = reduce(lambda l, r: l & r,
+                              (f.present for f in filters))
+    with main.continuous:
+        all_present.in_ = all_present_cond @ 1
+        all_present.in_ = ~all_present_cond @ 0
+
     # Exit check for the "checker" loop, when we need an early exit
     # after the first collision is found.
     break_cond = main.cell("break_cond",
@@ -170,8 +185,8 @@ def build(rucksacks_per_team=1):
     with main.comb_group("check_item_break") as check_item_break:
         item_lt.left = item_idx.out
         item_lt.right = items.out
-        break_cond.in_ = (item_lt.out & ~filters[0].present) @ 1
-        break_cond.in_ = ~(item_lt.out & ~filters[0].present) @ 0
+        break_cond.in_ = (item_lt.out & ~all_present.out) @ 1
+        break_cond.in_ = ~(item_lt.out & ~all_present.out) @ 0
 
     # Accumulator for duplicate item priorities.
     accum = main.reg("accum", SCORE_WIDTH)
@@ -205,15 +220,18 @@ def build(rucksacks_per_team=1):
             ]),
         ]
 
-    # Control fragment: a loop to *check* the filter, aborting early if
-    # we find a collision.
+    # Control fragment: a loop to *check* all the filters, aborting
+    # early if we find a collision.
     check_loop = [
         reset_item,
         while_(break_cond.out, check_item_break, [
             load_item,
-            invoke(filters[0], in_value=item.out, in_set=const(1, 0),
-                   in_clear=const(1, 0)),
-            if_(filters[0].present, None, [
+            ast.ParComp([
+                invoke(filt, in_value=item.out, in_set=const(1, 0),
+                       in_clear=const(1, 0))
+                for filt in filters
+            ]),
+            if_(all_present.out, None, [
                 accum_priority,
             ]),
             {incr_item, incr_global_item},

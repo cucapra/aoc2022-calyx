@@ -18,8 +18,13 @@ def build_mem(comp, name, width, size, is_external=True, is_ref=False):
     return comp.cell(name, inst, is_external=is_external, is_ref=is_ref)
 
 
-def build():
+def build(use_compartments=True, rucksacks=1):
     """Build the `main` component for AOC day 3.
+
+    `use_compartments` means we divide every rucksack in half and count
+    its contents individually. `rucksacks` dictates the number of
+    different rucksacks (compartment pairs) we are looking for conflicts
+    among.
     """
     prog = Builder()
     main = prog.component("main")
@@ -58,22 +63,27 @@ def build():
         rucksack_lt.left = rucksack_idx.out
         rucksack_lt.right = rucksacks_reg.out
 
-    # Register for the contents loop limit. Divide the rucksack length
-    # by 2 to get the *compartment* length.
+    # Register for the contents loop limit. In compartment mode, divide
+    # the rucksack length by 2 to get the *compartment* length.
     items = main.reg("items", LENGTH_WIDTH)
-    rsh = main.cell(
-        "rsh",
-        ast.Stdlib().op("rsh", LENGTH_WIDTH, signed=False),
-    )
     with main.group("init_items") as init_items:
         lengths.read_en = 1
         lengths.addr0 = rucksack_idx.out
 
-        rsh.left = lengths.out
-        rsh.right = const(LENGTH_WIDTH, 1)  # Shift down 1 bit.
+        # Halve the rucksack length to get the compartment length.
+        if use_compartments:
+            rsh = main.cell(
+                "rsh",
+                ast.Stdlib().op("rsh", LENGTH_WIDTH, signed=False),
+            )
+            rsh.left = lengths.out
+            rsh.right = const(LENGTH_WIDTH, 1)  # Shift down 1 bit.
+            val = rsh.out
+        else:
+            val = lengths.out
 
         items.write_en = lengths.read_done
-        items.in_ = rsh.out
+        items.in_ = val
         init_items.done = items.done
 
     # Reset the contents loop counter.
@@ -176,6 +186,7 @@ def build():
         answer.in_ = accum.out
         finish.done = answer.write_done
 
+    # Overall control program.
     main.control += [
         init_rucksack,
         while_(rucksack_lt.out, check_rucksack, [
@@ -183,9 +194,13 @@ def build():
             invoke(filter, in_value=item.out, in_set=const(1, 1),
                    in_clear=const(1, 1)),
 
-            # First compartment.
-            {init_items, reset_item},
+            # Set up the contents counter, and record the place we'll
+            # jump for the next rucksack.
+            init_items,
             save_next,
+
+            # First compartment populates the filter.
+            reset_item,
             while_(item_lt.out, check_item, [
                 load_item,
                 invoke(filter, in_value=item.out, in_set=const(1, 1),
@@ -193,7 +208,7 @@ def build():
                 {incr_item, incr_global_item},
             ]),
 
-            # Second compartment.
+            # Second compartment checks the filter.
             reset_item,
             while_(break_cond.out, check_item_break, [
                 load_item,

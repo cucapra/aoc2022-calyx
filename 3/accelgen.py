@@ -18,13 +18,13 @@ def build_mem(comp, name, width, size, is_external=True, is_ref=False):
     return comp.cell(name, inst, is_external=is_external, is_ref=is_ref)
 
 
-def build(use_compartments=True, rucksacks=1):
+def build(rucksacks_per_team=1):
     """Build the `main` component for AOC day 3.
 
-    `use_compartments` means we divide every rucksack in half and count
-    its contents individually. `rucksacks` dictates the number of
-    different rucksacks (compartment pairs) we are looking for conflicts
-    among.
+    `rucksacks_per_team` dictates the number of different rucksacks
+    (compartment pairs) we are looking for conflicts among. If this is
+    1, then we look at *compartments* within a single rucksack: i.e., we
+    chop each rucksack contents in half and treat them as separate.
     """
     prog = Builder()
     main = prog.component("main")
@@ -71,7 +71,7 @@ def build(use_compartments=True, rucksacks=1):
         lengths.addr0 = rucksack_idx.out
 
         # Halve the rucksack length to get the compartment length.
-        if use_compartments:
+        if rucksacks_per_team == 1:
             rsh = main.cell(
                 "rsh",
                 ast.Stdlib().op("rsh", LENGTH_WIDTH, signed=False),
@@ -186,6 +186,66 @@ def build(use_compartments=True, rucksacks=1):
         answer.in_ = accum.out
         finish.done = answer.write_done
 
+    # Control fragment: a loop to *populate* a filter (i.e., mark
+    # contents but don't check them).
+    populate_loop = [
+        reset_item,
+        while_(item_lt.out, check_item, [
+            load_item,
+            invoke(filter, in_value=item.out, in_set=const(1, 1),
+                   in_clear=const(1, 0)),
+            {incr_item, incr_global_item},
+        ]),
+    ]
+
+    # Control fragment: a loop to *check* the filter, aborting early if
+    # we find a collision.
+    check_loop = [
+        reset_item,
+        while_(break_cond.out, check_item_break, [
+            load_item,
+            invoke(filter, in_value=item.out, in_set=const(1, 0),
+                   in_clear=const(1, 0)),
+            if_(filter.present, None, [
+                accum_priority,
+            ]),
+            {incr_item, incr_global_item},
+        ]),
+    ]
+
+    # Larger control fragment: "unrolled loop" to process all the
+    # contiguous rucksacks in a "team" (not the term used in the
+    # description, but "group" was already taken :).
+    team_control = []
+    for i in range(rucksacks_per_team):
+        # Set up the contents register (the loop limit for processing
+        # each set of contents), and record the place we'll jump for the
+        # next rucksack.
+        team_control += [
+            init_items,
+            save_next,
+        ]
+
+        if rucksacks_per_team == 1:
+            # With only a single rucksack, check both compartments. Our
+            # loop limit has already been adjusted to only look at one
+            # compartment instead of the whole rucksack.
+            team_control += [
+                populate_loop,
+                check_loop,
+            ]
+        elif i == rucksacks_per_team - 1:
+            # *Check* the filter in the last rucksack.
+            team_control.append(check_loop)
+        else:
+            # *Populate* the filter for every other rucksack.
+            team_control.append(populate_loop)
+
+        # Advance to the next rucksack.
+        team_control += [
+            {incr_rucksack, jump_global_item},
+        ]
+
     # Overall control program.
     main.control += [
         init_rucksack,
@@ -194,33 +254,8 @@ def build(use_compartments=True, rucksacks=1):
             invoke(filter, in_value=item.out, in_set=const(1, 1),
                    in_clear=const(1, 1)),
 
-            # Set up the contents counter, and record the place we'll
-            # jump for the next rucksack.
-            init_items,
-            save_next,
-
-            # First compartment populates the filter.
-            reset_item,
-            while_(item_lt.out, check_item, [
-                load_item,
-                invoke(filter, in_value=item.out, in_set=const(1, 1),
-                       in_clear=const(1, 0)),
-                {incr_item, incr_global_item},
-            ]),
-
-            # Second compartment checks the filter.
-            reset_item,
-            while_(break_cond.out, check_item_break, [
-                load_item,
-                invoke(filter, in_value=item.out, in_set=const(1, 0),
-                       in_clear=const(1, 0)),
-                if_(filter.present, None, [
-                    accum_priority,
-                ]),
-                {incr_item, incr_global_item},
-            ]),
-
-            {incr_rucksack, jump_global_item},
+            # Process the next chunk of rucksacks.
+            team_control,
         ]),
         finish,
     ]

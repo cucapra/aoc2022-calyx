@@ -124,18 +124,25 @@ def build(rucksacks_per_team=1):
         incr_global_item.done = global_item_idx.done
 
     # Save the *next* global start index at the beginning of the
-    # outer loop: `next_idx = idx + 2 * items`
+    # outer loop: `next_idx = idx + items`
     next_idx = main.reg("next_idx", CONTENTS_IDX_WIDTH)
     pad = main.cell("pad_idx", ast.CompInst("std_pad", [LENGTH_WIDTH,
                                                         CONTENTS_IDX_WIDTH]))
-    double = main.add("double", CONTENTS_IDX_WIDTH)
     jump_add = main.add("jump_add", CONTENTS_IDX_WIDTH)
     with main.group("save_next") as save_next:
         jump_add.left = global_item_idx.out
         pad.in_ = items.out
-        double.left = pad.out
-        double.right = pad.out
-        jump_add.right = double.out
+
+        # Double the rucksack compartment size to get the full rucksack
+        # size.
+        if rucksacks_per_team == 1:
+            double = main.add("double", CONTENTS_IDX_WIDTH)
+            double.left = pad.out
+            double.right = pad.out
+            jump_add.right = double.out
+        else:
+            jump_add.right = pad.out
+
         next_idx.write_en = 1
         next_idx.in_ = jump_add.out
         save_next.done = next_idx.done
@@ -273,17 +280,17 @@ def build(rucksacks_per_team=1):
         ]
 
     # Control fragment: "unrolled loop" to reset all the filters.
-    reset_filters = [
+    reset_filters = ast.ParComp([
         invoke(filt, in_value=item.out, in_set=const(1, 1),
                in_clear=const(1, 1))
         for filt in filters
-    ]
+    ])
 
     # Overall control program.
     main.control += [
         init_rucksack,
         while_(rucksack_lt.out, check_rucksack,
-               reset_filters + team_control),
+               [reset_filters] + team_control),
         finish,
     ]
 

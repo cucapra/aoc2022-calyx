@@ -153,19 +153,25 @@ def build(rucksacks_per_team=1):
         item.in_ = contents.out
         load_item.done = item.done
 
-    # Filter subcomponent.
+    # Filter subcomponents. We need one fewer filters than we have
+    # chunks of components to process: the last one will merely check
+    # the existing filters.
     filter_def = build_filter(prog, ITEM_WIDTH)
-    filter = main.cell("filter", filter_def)
+    num_filters = 1 if rucksacks_per_team == 1 else rucksacks_per_team - 1
+    filters = [
+        main.cell(f"filter{i}", filter_def)
+        for i in range(num_filters)
+    ]
 
-    # Exit check for *second* item loop, when we need an early exit
+    # Exit check for the "checker" loop, when we need an early exit
     # after the first collision is found.
     break_cond = main.cell("break_cond",
                            ast.Stdlib().op("wire", 1, signed=False))
     with main.comb_group("check_item_break") as check_item_break:
         item_lt.left = item_idx.out
         item_lt.right = items.out
-        break_cond.in_ = (item_lt.out & ~filter.present) @ 1
-        break_cond.in_ = ~(item_lt.out & ~filter.present) @ 0
+        break_cond.in_ = (item_lt.out & ~filters[0].present) @ 1
+        break_cond.in_ = ~(item_lt.out & ~filters[0].present) @ 0
 
     # Accumulator for duplicate item priorities.
     accum = main.reg("accum", SCORE_WIDTH)
@@ -188,15 +194,14 @@ def build(rucksacks_per_team=1):
 
     # Control fragment: a loop to *populate* a filter (i.e., mark
     # contents but don't check them).
-    populate_loop = [
+    def populate_loop(filt):
         reset_item,
-        while_(item_lt.out, check_item, [
+        return while_(item_lt.out, check_item, [
             load_item,
-            invoke(filter, in_value=item.out, in_set=const(1, 1),
+            invoke(filt, in_value=item.out, in_set=const(1, 1),
                    in_clear=const(1, 0)),
             {incr_item, incr_global_item},
-        ]),
-    ]
+        ])
 
     # Control fragment: a loop to *check* the filter, aborting early if
     # we find a collision.
@@ -204,9 +209,9 @@ def build(rucksacks_per_team=1):
         reset_item,
         while_(break_cond.out, check_item_break, [
             load_item,
-            invoke(filter, in_value=item.out, in_set=const(1, 0),
+            invoke(filters[0], in_value=item.out, in_set=const(1, 0),
                    in_clear=const(1, 0)),
-            if_(filter.present, None, [
+            if_(filters[0].present, None, [
                 accum_priority,
             ]),
             {incr_item, incr_global_item},
@@ -231,7 +236,7 @@ def build(rucksacks_per_team=1):
             # loop limit has already been adjusted to only look at one
             # compartment instead of the whole rucksack.
             team_control += [
-                populate_loop,
+                populate_loop(filters[0]),
                 check_loop,
             ]
         elif i == rucksacks_per_team - 1:
@@ -239,24 +244,25 @@ def build(rucksacks_per_team=1):
             team_control.append(check_loop)
         else:
             # *Populate* the filter for every other rucksack.
-            team_control.append(populate_loop)
+            team_control.append(populate_loop(filters[i]))
 
         # Advance to the next rucksack.
         team_control += [
             {incr_rucksack, jump_global_item},
         ]
 
+    # Control fragment: "unrolled loop" to reset all the filters.
+    reset_filters = [
+        invoke(filt, in_value=item.out, in_set=const(1, 1),
+               in_clear=const(1, 1))
+        for filt in filters
+    ]
+
     # Overall control program.
     main.control += [
         init_rucksack,
-        while_(rucksack_lt.out, check_rucksack, [
-            # Reset the filter.
-            invoke(filter, in_value=item.out, in_set=const(1, 1),
-                   in_clear=const(1, 1)),
-
-            # Process the next chunk of rucksacks.
-            team_control,
-        ]),
+        while_(rucksack_lt.out, check_rucksack,
+               reset_filters + team_control),
         finish,
     ]
 

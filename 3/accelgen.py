@@ -58,13 +58,22 @@ def build():
         rucksack_lt.left = rucksack_idx.out
         rucksack_lt.right = rucksacks_reg.out
 
-    # Register for the contents loop limit.
+    # Register for the contents loop limit. Divide the rucksack length
+    # by 2 to get the *compartment* length.
     items = main.reg("items", LENGTH_WIDTH)
+    rsh = main.cell(
+        "rsh",
+        ast.Stdlib().op("rsh", LENGTH_WIDTH, signed=False),
+    )
     with main.group("init_items") as init_items:
         lengths.read_en = 1
         lengths.addr0 = rucksack_idx.out
+
+        rsh.left = lengths.out
+        rsh.right = const(LENGTH_WIDTH, 1)  # Shift down 1 bit.
+
         items.write_en = lengths.read_done
-        items.in_ = lengths.out
+        items.in_ = rsh.out
         init_items.done = items.done
 
     # Reset the contents loop counter.

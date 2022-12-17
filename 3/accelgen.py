@@ -239,12 +239,12 @@ def build(rucksacks_per_team=1):
                 populate_loop(filters[0]),
                 check_loop,
             ]
-        elif i == rucksacks_per_team - 1:
-            # *Check* the filter in the last rucksack.
-            team_control.append(check_loop)
-        else:
-            # *Populate* the filter for every other rucksack.
+        elif i < rucksacks_per_team - 1:
+            # *Populate* the filter for every rucksack but the last.
             team_control.append(populate_loop(filters[i]))
+        else:
+            # *Check* the filters in the last rucksack.
+            team_control.append(check_loop)
 
         # Advance to the next rucksack.
         team_control += [

@@ -1,4 +1,5 @@
 from functools import reduce
+import sys
 from calyx.builder import Builder, while_, if_, const, invoke
 from calyx import py_ast as ast
 
@@ -377,4 +378,4 @@ def build_filter(prog, width):
 
 
 if __name__ == '__main__':
-    build().emit()
+    build(int(sys.argv[1])).emit()

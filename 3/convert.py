@@ -1,9 +1,8 @@
 """Generate memories for the rucksack contents.
 
 The idea is to use the priority value of each item (which unambiguously
-identifies the item in 6 bits). We record the *size* of one
-*compartment* in each rucksack (so this is a sparse encoding, unlike Day
-1).
+identifies the item in 6 bits). We record the *size* of one each
+rucksack (so this is a sparse encoding, unlike Day 1).
 """
 import sys
 import json
@@ -28,7 +27,7 @@ def convert(infile):
         line = line.strip()
         vals = [char2pri(c) for c in line]
         contents += vals
-        lengths.append(len(vals) // 2)
+        lengths.append(len(vals))
 
     assert len(contents) <= MAX_CONTENTS
 

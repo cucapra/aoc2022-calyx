@@ -172,17 +172,17 @@ def build(rucksacks_per_team=1):
         for i in range(num_filters)
     ]
 
-    # A continuous, combinational computation for the conjunction of all
+    # A combinational computation for the conjunction of all
     # filters: i.e., whether the current index is present in *all*
-    # filters. (This could be encapsulated in a `comb group`, but we
-    # actually want to use it in the context of a different `comb group`
-    # that builds on it... weird! Overall, I don't like this Calyx code
-    # very much... I would almost prefer a structural `std_and` tree.)
+    # filters. (Overall, I don't like this style very much... I would
+    # almost prefer a structural `std_and` tree. It seems weird to have
+    # to define a wire (and two complementary assignments) just to use a
+    # logical expression in an `if`.)
     all_present = main.cell("all_present",
                             ast.Stdlib().op("wire", 1, signed=False))
     all_present_cond = reduce(lambda l, r: l & r,
                               (f.present for f in filters))
-    with main.continuous:
+    with main.comb_group("presence_check") as presence_check:
         all_present.in_ = all_present_cond @ 1
         all_present.in_ = ~all_present_cond @ 0
 
@@ -193,8 +193,8 @@ def build(rucksacks_per_team=1):
     with main.comb_group("check_item_break") as check_item_break:
         item_lt.left = item_idx.out
         item_lt.right = items.out
-        break_cond.in_ = (item_lt.out & ~all_present.out) @ 1
-        break_cond.in_ = ~(item_lt.out & ~all_present.out) @ 0
+        break_cond.in_ = (item_lt.out & ~all_present_cond) @ 1
+        break_cond.in_ = ~(item_lt.out & ~all_present_cond) @ 0
 
     # Accumulator for duplicate item priorities.
     accum = main.reg("accum", SCORE_WIDTH)
@@ -239,9 +239,7 @@ def build(rucksacks_per_team=1):
                        in_clear=const(1, 0))
                 for filt in filters
             ]),
-            if_(all_present.out, None, [
-                accum_priority,
-            ]),
+            if_(all_present.out, presence_check, accum_priority),
             {incr_item, incr_global_item},
         ]),
     ]

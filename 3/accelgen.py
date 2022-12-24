@@ -71,26 +71,17 @@ def build_item_loop(main, contents, item_idx, global_item_idx, item):
     return contents_loop
 
 
-def build(rucksacks_per_team=1):
-    """Build the `main` component for AOC day 3.
+def build_team_loop(main, rucksacks_per_team, contents, lengths, rucksacks,
+                    accum, filters, rucksack_idx):
+    """Build a control program to process a single elf team.
 
-    `rucksacks_per_team` dictates the number of different rucksacks
-    (compartment pairs) we are looking for conflicts among. If this is
-    1, then we look at *compartments* within a single rucksack: i.e., we
-    chop each rucksack contents in half and treat them as separate.
+    This produces an "unrolled loop" that processes all the contiguous
+    rucksacks in a "team." That's 1 elf (two compartments) for Part 1 of
+    the puzzle and 3 elves for Part 2. ("Team" is not the term used in
+    the description, but "group" was already taken. :)
     """
-    prog = Builder()
-    main = prog.component("main")
-
-    # Inputs & outputs.
-    contents = build_mem(main, "contents", ITEM_WIDTH, MAX_CONTENTS)
-    lengths = build_mem(main, "lengths", LENGTH_WIDTH, MAX_RUCKSACKS)
-    rucksacks = build_mem(main, "rucksacks", RUCKSACK_IDX_WIDTH, 1)
-    answer = build_mem(main, "answer", SCORE_WIDTH, 1)
-
     # Register for the contents loop limit. In compartment mode, divide
     # the rucksack length by 2 to get the *compartment* length.
-    rucksack_idx = main.reg("rucksack_idx", RUCKSACK_IDX_WIDTH)
     items = main.reg("items", LENGTH_WIDTH)
     with main.group("init_items") as init_items:
         lengths.read_en = 1
@@ -111,16 +102,6 @@ def build(rucksacks_per_team=1):
         items.write_en = lengths.read_done
         items.in_ = val
         init_items.done = items.done
-
-    # Filter subcomponents. We need one fewer filters than we have
-    # chunks of components to process: the last one will merely check
-    # the existing filters.
-    filter_def = build_filter(prog, ITEM_WIDTH)
-    num_filters = 1 if rucksacks_per_team == 1 else rucksacks_per_team - 1
-    filters = [
-        main.cell(f"filter{i}", filter_def)
-        for i in range(num_filters)
-    ]
 
     # A combinational computation for the conjunction of all
     # filters: i.e., whether the current index is present in *all*
@@ -163,7 +144,6 @@ def build(rucksacks_per_team=1):
         )
 
     # Accumulator for duplicate item priorities.
-    accum = main.reg("accum", SCORE_WIDTH)
     accum_add = main.add("accum_add", SCORE_WIDTH)
     pad = main.cell("pad", ast.CompInst("std_pad", [ITEM_WIDTH, SCORE_WIDTH]))
     with main.group("accum_priority") as accum_priority:
@@ -229,15 +209,6 @@ def build(rucksacks_per_team=1):
         global_item_idx.in_ = next_idx.out
         jump_global_item.done = global_item_idx.done
 
-    # (Constant) register for rucksack loop limit.
-    rucksacks_reg = main.reg("rucksacks_reg", RUCKSACK_IDX_WIDTH)
-    with main.group("init_rucksack") as init_rucksack:
-        rucksacks.read_en = 1
-        rucksacks.addr0 = 0
-        rucksacks_reg.write_en = rucksacks.read_done
-        rucksacks_reg.in_ = rucksacks.out
-        init_rucksack.done = rucksacks_reg.done
-
     # Increment for rucksack loop.
     rucksack_add = main.add("rucksack_add", RUCKSACK_IDX_WIDTH)
     with main.group("incr_rucksack") as incr_rucksack:
@@ -247,9 +218,7 @@ def build(rucksacks_per_team=1):
         rucksack_idx.in_ = rucksack_add.out
         incr_rucksack.done = rucksack_idx.done
 
-    # Larger control fragment: "unrolled loop" to process all the
-    # contiguous rucksacks in a "team" (not the term used in the
-    # description, but "group" was already taken :).
+    # Final control for the "unrolled loop."
     team_control = []
     for i in range(rucksacks_per_team):
         # Set up the contents register (the loop limit for processing
@@ -276,16 +245,62 @@ def build(rucksacks_per_team=1):
             team_control.append(check_loop)
 
         # Advance to the next rucksack.
-        team_control += [
+        team_control.append(
             {incr_rucksack, jump_global_item},
-        ]
+        )
+
+    return team_control
+
+
+def build(rucksacks_per_team=1):
+    """Build the `main` component for AOC day 3.
+
+    `rucksacks_per_team` dictates the number of different rucksacks
+    (compartment pairs) we are looking for conflicts among. If this is
+    1, then we look at *compartments* within a single rucksack: i.e., we
+    chop each rucksack contents in half and treat them as separate.
+    """
+    prog = Builder()
+    main = prog.component("main")
+
+    # Inputs & outputs.
+    contents = build_mem(main, "contents", ITEM_WIDTH, MAX_CONTENTS)
+    lengths = build_mem(main, "lengths", LENGTH_WIDTH, MAX_RUCKSACKS)
+    rucksacks = build_mem(main, "rucksacks", RUCKSACK_IDX_WIDTH, 1)
+    answer = build_mem(main, "answer", SCORE_WIDTH, 1)
+
+    # Filter subcomponents. We need one fewer filters than we have
+    # chunks of components to process: the last one will merely check
+    # the existing filters.
+    filter_def = build_filter(prog, ITEM_WIDTH)
+    num_filters = 1 if rucksacks_per_team == 1 else rucksacks_per_team - 1
+    filters = [
+        main.cell(f"filter{i}", filter_def)
+        for i in range(num_filters)
+    ]
+
+    # Generate the primary logic for processing a team of elves.
+    accum = main.reg("accum", SCORE_WIDTH)
+    rucksack_idx = main.reg("rucksack_idx", RUCKSACK_IDX_WIDTH)
+    team_control = build_team_loop(main, rucksacks_per_team,
+                                   contents, lengths, rucksacks, accum,
+                                   filters, rucksack_idx)
 
     # Control fragment: "unrolled loop" to reset all the filters.
     reset_filters = ast.ParComp([
-        invoke(filt, in_value=item.out, in_set=const(1, 1),
+        invoke(filt, in_value=const(ITEM_WIDTH, 0), in_set=const(1, 0),
                in_clear=const(1, 1))
         for filt in filters
     ])
+
+    # (Constant) register for rucksack loop limit.
+    rucksacks_reg = main.reg("rucksacks_reg", RUCKSACK_IDX_WIDTH)
+    with main.group("init_rucksack") as init_rucksack:
+        rucksacks.read_en = 1
+        rucksacks.addr0 = 0
+        rucksacks_reg.write_en = rucksacks.read_done
+        rucksacks_reg.in_ = rucksacks.out
+        init_rucksack.done = rucksacks_reg.done
 
     # Exit check for rucksack loop.
     rucksack_lt = main.cell(

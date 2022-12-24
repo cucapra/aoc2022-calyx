@@ -20,6 +20,57 @@ def build_mem(comp, name, width, size, is_external=True, is_ref=False):
     return comp.cell(name, inst, is_external=is_external, is_ref=is_ref)
 
 
+def build_item_loop(main, contents, item_idx, global_item_idx, item):
+    """Generate a loop *generator* for iterating over items.
+    """
+    # Reset the contents loop counter.
+    with main.group("reset_item") as reset_item:
+        item_idx.write_en = 1
+        item_idx.in_ = 0
+        reset_item.done = item_idx.done
+
+    # Increment for the item loop.
+    item_add = main.add("item_add", LENGTH_WIDTH)
+    with main.group("incr_item") as incr_item:
+        item_add.left = item_idx.out
+        item_add.right = 1
+        item_idx.write_en = 1
+        item_idx.in_ = item_add.out
+        incr_item.done = item_idx.done
+
+    # Increment for the *global* item index.
+    global_item_add = main.add("global_item_add", CONTENTS_IDX_WIDTH)
+    with main.group("incr_global_item") as incr_global_item:
+        global_item_add.left = global_item_idx.out
+        global_item_add.right = 1
+        global_item_idx.write_en = 1
+        global_item_idx.in_ = global_item_add.out
+        incr_global_item.done = global_item_idx.done
+
+    # Load the actual item value from rucksack contents.
+    with main.group("load_item") as load_item:
+        contents.read_en = 1
+        contents.addr0 = global_item_idx.out
+        item.write_en = contents.read_done
+        item.in_ = contents.out
+        load_item.done = item.done
+
+    # Generate a control loop that iterates over the contents in a
+    # single rucksack/compartment. The supplied body runs after we load
+    # the item value (priority) and before we advance the iterator.
+    def contents_loop(cond, cond_grp, body):
+        return [
+            reset_item,
+            while_(cond, cond_grp, [
+                load_item,
+                body,
+                {incr_item, incr_global_item},
+            ]),
+        ]
+
+    return contents_loop
+
+
 def build(rucksacks_per_team=1):
     """Build the `main` component for AOC day 3.
 
@@ -65,6 +116,13 @@ def build(rucksacks_per_team=1):
         rucksack_lt.left = rucksack_idx.out
         rucksack_lt.right = rucksacks_reg.out
 
+    # Generic loop structure for iterating over items.
+    item_idx = main.reg("item_idx", LENGTH_WIDTH)
+    global_item_idx = main.reg("global_item_idx", CONTENTS_IDX_WIDTH)
+    item = main.reg("item", ITEM_WIDTH)
+    contents_loop = build_item_loop(main, contents, item_idx,
+                                    global_item_idx, item)
+
     # Register for the contents loop limit. In compartment mode, divide
     # the rucksack length by 2 to get the *compartment* length.
     items = main.reg("items", LENGTH_WIDTH)
@@ -88,22 +146,6 @@ def build(rucksacks_per_team=1):
         items.in_ = val
         init_items.done = items.done
 
-    # Reset the contents loop counter.
-    item_idx = main.reg("item_idx", LENGTH_WIDTH)
-    with main.group("reset_item") as reset_item:
-        item_idx.write_en = 1
-        item_idx.in_ = 0
-        reset_item.done = item_idx.done
-
-    # Increment for the item loop.
-    item_add = main.add("item_add", LENGTH_WIDTH)
-    with main.group("incr_item") as incr_item:
-        item_add.left = item_idx.out
-        item_add.right = 1
-        item_idx.write_en = 1
-        item_idx.in_ = item_add.out
-        incr_item.done = item_idx.done
-
     # Exit check for *first* item loop.
     item_lt = main.cell(
         "item_lt",
@@ -112,16 +154,6 @@ def build(rucksacks_per_team=1):
     with main.comb_group("check_item") as check_item:
         item_lt.left = item_idx.out
         item_lt.right = items.out
-
-    # Increment for the *global* item index.
-    global_item_idx = main.reg("global_item_idx", CONTENTS_IDX_WIDTH)
-    global_item_add = main.add("global_item_add", CONTENTS_IDX_WIDTH)
-    with main.group("incr_global_item") as incr_global_item:
-        global_item_add.left = global_item_idx.out
-        global_item_add.right = 1
-        global_item_idx.write_en = 1
-        global_item_idx.in_ = global_item_add.out
-        incr_global_item.done = global_item_idx.done
 
     # Save the *next* global start index at the beginning of the
     # outer loop: `next_idx = idx + items`
@@ -152,15 +184,6 @@ def build(rucksacks_per_team=1):
         global_item_idx.write_en = 1
         global_item_idx.in_ = next_idx.out
         jump_global_item.done = global_item_idx.done
-
-    # Load the actual item value from rucksack contents.
-    item = main.reg("item", ITEM_WIDTH)
-    with main.group("load_item") as load_item:
-        contents.read_en = 1
-        contents.addr0 = global_item_idx.out
-        item.write_en = contents.read_done
-        item.in_ = contents.out
-        load_item.done = item.done
 
     # Filter subcomponents. We need one fewer filters than we have
     # chunks of components to process: the last one will merely check
@@ -214,19 +237,6 @@ def build(rucksacks_per_team=1):
         answer.addr0 = 0
         answer.in_ = accum.out
         finish.done = answer.write_done
-
-    # Generate a control loop that iterates over the contents in a
-    # single rucksack/compartment. The supplied body runs after we load
-    # the item value (priority) and before we advance the iterator.
-    def contents_loop(cond, cond_grp, body):
-        return [
-            reset_item,
-            while_(cond, cond_grp, [
-                load_item,
-                body,
-                {incr_item, incr_global_item},
-            ]),
-        ]
 
     # Control fragment: a loop to *populate* a filter (i.e., mark
     # contents but don't check them).

@@ -18,15 +18,15 @@ This was probably the most interesting part of the Calyx implementation: we use 
 You can think of many different ways to update the top `k` values, such as keeping a sorted list; we used a simple strategy that combinationally re-identifies the minimum value each time.
 It's not clear if this is wise at all, but it is kind of fun.
 
-To run the whole thing on the sample input, through Verilator:
+To run the whole thing on the sample input, through Icarus Verilog:
 
-    make part1-sample
+    $ turnt -e part1-icarus sample.txt
 
 To run on your special input, put it in a file called `full.txt` or something and then do:
 
-    make part1-full
+    $ turnt -e part1-icarus full.txt
 
 That's for the first star.
-To earn the second star, use `part2-sample` or similar.
+To earn the second star, use `part2-icarus` or similar.
 
 [day1]: https://adventofcode.com/2022/day/1

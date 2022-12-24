@@ -3,10 +3,9 @@ Day 2: Rock Paper Scissors
 
 To solve the two parts on the sample input in `sample.txt`, type:
 
-    make part1-sample
-    make part2-sample
+    $ turnt -e part1-icarus -e part2-icarus sample.txt
 
-Then replace `sample` with the name of your full input text file to solve the real thing.
+Then replace `sample.txt` with the name of your full input text file to solve the real thing.
 
 This puzzle involves several arbitrarily-chosen score values for two conditions (which shape you play, and whether you win, lose, or tie).
 In hardware, the natural strategy for this sort of thing is a look-up table (LUT).

@@ -215,34 +215,43 @@ def build(rucksacks_per_team=1):
         answer.in_ = accum.out
         finish.done = answer.write_done
 
-    # Control fragment: a loop to *populate* a filter (i.e., mark
-    # contents but don't check them).
-    def populate_loop(filt):
+    # Generate a control loop that iterates over the contents in a
+    # single rucksack/compartment. The supplied body runs after we load
+    # the item value (priority) and before we advance the iterator.
+    def contents_loop(cond, cond_grp, body):
         return [
             reset_item,
-            while_(item_lt.out, check_item, [
+            while_(cond, cond_grp, [
                 load_item,
-                invoke(filt, in_value=item.out, in_set=const(1, 1),
-                       in_clear=const(1, 0)),
+                body,
                 {incr_item, incr_global_item},
             ]),
         ]
 
+    # Control fragment: a loop to *populate* a filter (i.e., mark
+    # contents but don't check them).
+    def populate_loop(filt):
+        return contents_loop(
+            item_lt.out,
+            check_item,
+            invoke(filt, in_value=item.out, in_set=const(1, 1),
+                   in_clear=const(1, 0)),
+        )
+
     # Control fragment: a loop to *check* all the filters, aborting
     # early if we find a collision.
-    check_loop = [
-        reset_item,
-        while_(break_cond.out, check_item_break, [
-            load_item,
+    check_loop = contents_loop(
+        break_cond.out,
+        check_item_break,
+        [
             ast.ParComp([
                 invoke(filt, in_value=item.out, in_set=const(1, 0),
                        in_clear=const(1, 0))
                 for filt in filters
             ]),
             if_(all_present.out, presence_check, accum_priority),
-            {incr_item, incr_global_item},
-        ]),
-    ]
+        ],
+    )
 
     # Larger control fragment: "unrolled loop" to process all the
     # contiguous rucksacks in a "team" (not the term used in the

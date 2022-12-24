@@ -1,0 +1,37 @@
+[envs.part1-verilator]
+command = """make -s part1.futil {base}.json
+fud e part1.futil --to dat --through verilog -s verilog.data {base}.json | \
+    jq .memories.answer[0]"""
+output.part1 = "-"
+
+[envs.part1-interp]
+command = """make -s part1.futil {base}.json
+fud e part1.futil --to interpreter-out -s verilog.data {base}.json | \
+    jq .main.answer[0]"""
+output.part1 = "-"
+
+[envs.part1-icarus]
+command = """make -s part1.futil {base}.json
+fud e part1.futil --to dat --through icarus-verilog \
+    -s verilog.data {base}.json | \
+    jq .memories.answer[0]"""
+output.part1 = "-"
+
+[envs.part2-verilator]
+command = """make -s part1.futil {base}.json
+fud e part2.futil --to dat --through verilog -s verilog.data {base}.json | \
+    jq .memories.answer[0]"""
+output.part2 = "-"
+
+[envs.part2-interp]
+command = """make -s part1.futil {base}.json
+fud e part2.futil --to interpreter-out -s verilog.data {base}.json | \
+    jq .main.answer[0]"""
+output.part2 = "-"
+
+[envs.part2-icarus]
+command = """make -s part1.futil {base}.json
+fud e part2.futil --to dat --through icarus-verilog \
+    -s verilog.data {base}.json | \
+    jq .memories.answer[0]"""
+output.part2 = "-"

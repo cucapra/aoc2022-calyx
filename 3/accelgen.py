@@ -88,43 +88,9 @@ def build(rucksacks_per_team=1):
     rucksacks = build_mem(main, "rucksacks", RUCKSACK_IDX_WIDTH, 1)
     answer = build_mem(main, "answer", SCORE_WIDTH, 1)
 
-    # (Constant) register for rucksack loop limit.
-    rucksacks_reg = main.reg("rucksacks_reg", RUCKSACK_IDX_WIDTH)
-    with main.group("init_rucksack") as init_rucksack:
-        rucksacks.read_en = 1
-        rucksacks.addr0 = 0
-        rucksacks_reg.write_en = rucksacks.read_done
-        rucksacks_reg.in_ = rucksacks.out
-        init_rucksack.done = rucksacks_reg.done
-
-    # Increment for rucksack loop.
-    rucksack_idx = main.reg("rucksack_idx", RUCKSACK_IDX_WIDTH)
-    rucksack_add = main.add("rucksack_add", RUCKSACK_IDX_WIDTH)
-    with main.group("incr_rucksack") as incr_rucksack:
-        rucksack_add.left = rucksack_idx.out
-        rucksack_add.right = 1
-        rucksack_idx.write_en = 1
-        rucksack_idx.in_ = rucksack_add.out
-        incr_rucksack.done = rucksack_idx.done
-
-    # Exit check for rucksack loop.
-    rucksack_lt = main.cell(
-        "rucksack_lt",
-        ast.Stdlib().op("lt", RUCKSACK_IDX_WIDTH, signed=False),
-    )
-    with main.comb_group("check_rucksack") as check_rucksack:
-        rucksack_lt.left = rucksack_idx.out
-        rucksack_lt.right = rucksacks_reg.out
-
-    # Generic loop structure for iterating over items.
-    item_idx = main.reg("item_idx", LENGTH_WIDTH)
-    global_item_idx = main.reg("global_item_idx", CONTENTS_IDX_WIDTH)
-    item = main.reg("item", ITEM_WIDTH)
-    contents_loop = build_item_loop(main, contents, item_idx,
-                                    global_item_idx, item)
-
     # Register for the contents loop limit. In compartment mode, divide
     # the rucksack length by 2 to get the *compartment* length.
+    rucksack_idx = main.reg("rucksack_idx", RUCKSACK_IDX_WIDTH)
     items = main.reg("items", LENGTH_WIDTH)
     with main.group("init_items") as init_items:
         lengths.read_en = 1
@@ -146,7 +112,38 @@ def build(rucksacks_per_team=1):
         items.in_ = val
         init_items.done = items.done
 
-    # Exit check for *first* item loop.
+    # Filter subcomponents. We need one fewer filters than we have
+    # chunks of components to process: the last one will merely check
+    # the existing filters.
+    filter_def = build_filter(prog, ITEM_WIDTH)
+    num_filters = 1 if rucksacks_per_team == 1 else rucksacks_per_team - 1
+    filters = [
+        main.cell(f"filter{i}", filter_def)
+        for i in range(num_filters)
+    ]
+
+    # A combinational computation for the conjunction of all
+    # filters: i.e., whether the current index is present in *all*
+    # filters. (Overall, I don't like this style very much... I would
+    # almost prefer a structural `std_and` tree. It seems weird to have
+    # to define a wire (and two complementary assignments) just to use a
+    # logical expression in an `if`.)
+    all_present = main.cell("all_present",
+                            ast.Stdlib().op("wire", 1, signed=False))
+    all_present_cond = reduce(lambda l, r: l & r,
+                              (f.present for f in filters))
+    with main.comb_group("presence_check") as presence_check:
+        all_present.in_ = all_present_cond @ 1
+        all_present.in_ = ~all_present_cond @ 0
+
+    # Generic loop structure for iterating over items.
+    item_idx = main.reg("item_idx", LENGTH_WIDTH)
+    global_item_idx = main.reg("global_item_idx", CONTENTS_IDX_WIDTH)
+    item = main.reg("item", ITEM_WIDTH)
+    contents_loop = build_item_loop(main, contents, item_idx,
+                                    global_item_idx, item)
+
+    # An exit check for the "populate" item loop.
     item_lt = main.cell(
         "item_lt",
         ast.Stdlib().op("lt", LENGTH_WIDTH, signed=False),
@@ -154,6 +151,53 @@ def build(rucksacks_per_team=1):
     with main.comb_group("check_item") as check_item:
         item_lt.left = item_idx.out
         item_lt.right = items.out
+
+    # Control fragment: a loop to *populate* a filter (i.e., mark
+    # contents but don't check them).
+    def populate_loop(filt):
+        return contents_loop(
+            item_lt.out,
+            check_item,
+            invoke(filt, in_value=item.out, in_set=const(1, 1),
+                   in_clear=const(1, 0)),
+        )
+
+    # Accumulator for duplicate item priorities.
+    accum = main.reg("accum", SCORE_WIDTH)
+    accum_add = main.add("accum_add", SCORE_WIDTH)
+    pad = main.cell("pad", ast.CompInst("std_pad", [ITEM_WIDTH, SCORE_WIDTH]))
+    with main.group("accum_priority") as accum_priority:
+        accum_add.left = accum.out
+        pad.in_ = item.out
+        accum_add.right = pad.out
+        accum.write_en = 1
+        accum.in_ = accum_add.out
+        accum_priority.done = accum.done
+
+    # Next, an exit check for the "checker" loop, when we need an early
+    # exit after the first collision is found.
+    break_cond = main.cell("break_cond",
+                           ast.Stdlib().op("wire", 1, signed=False))
+    with main.comb_group("check_item_break") as check_item_break:
+        item_lt.left = item_idx.out
+        item_lt.right = items.out
+        break_cond.in_ = (item_lt.out & ~all_present_cond) @ 1
+        break_cond.in_ = ~(item_lt.out & ~all_present_cond) @ 0
+
+    # Control fragment: a loop to *check* all the filters, aborting
+    # early if we find a collision.
+    check_loop = contents_loop(
+        break_cond.out,
+        check_item_break,
+        [
+            ast.ParComp([
+                invoke(filt, in_value=item.out, in_set=const(1, 0),
+                       in_clear=const(1, 0))
+                for filt in filters
+            ]),
+            if_(all_present.out, presence_check, accum_priority),
+        ],
+    )
 
     # Save the *next* global start index at the beginning of the
     # outer loop: `next_idx = idx + items`
@@ -185,83 +229,23 @@ def build(rucksacks_per_team=1):
         global_item_idx.in_ = next_idx.out
         jump_global_item.done = global_item_idx.done
 
-    # Filter subcomponents. We need one fewer filters than we have
-    # chunks of components to process: the last one will merely check
-    # the existing filters.
-    filter_def = build_filter(prog, ITEM_WIDTH)
-    num_filters = 1 if rucksacks_per_team == 1 else rucksacks_per_team - 1
-    filters = [
-        main.cell(f"filter{i}", filter_def)
-        for i in range(num_filters)
-    ]
+    # (Constant) register for rucksack loop limit.
+    rucksacks_reg = main.reg("rucksacks_reg", RUCKSACK_IDX_WIDTH)
+    with main.group("init_rucksack") as init_rucksack:
+        rucksacks.read_en = 1
+        rucksacks.addr0 = 0
+        rucksacks_reg.write_en = rucksacks.read_done
+        rucksacks_reg.in_ = rucksacks.out
+        init_rucksack.done = rucksacks_reg.done
 
-    # A combinational computation for the conjunction of all
-    # filters: i.e., whether the current index is present in *all*
-    # filters. (Overall, I don't like this style very much... I would
-    # almost prefer a structural `std_and` tree. It seems weird to have
-    # to define a wire (and two complementary assignments) just to use a
-    # logical expression in an `if`.)
-    all_present = main.cell("all_present",
-                            ast.Stdlib().op("wire", 1, signed=False))
-    all_present_cond = reduce(lambda l, r: l & r,
-                              (f.present for f in filters))
-    with main.comb_group("presence_check") as presence_check:
-        all_present.in_ = all_present_cond @ 1
-        all_present.in_ = ~all_present_cond @ 0
-
-    # Exit check for the "checker" loop, when we need an early exit
-    # after the first collision is found.
-    break_cond = main.cell("break_cond",
-                           ast.Stdlib().op("wire", 1, signed=False))
-    with main.comb_group("check_item_break") as check_item_break:
-        item_lt.left = item_idx.out
-        item_lt.right = items.out
-        break_cond.in_ = (item_lt.out & ~all_present_cond) @ 1
-        break_cond.in_ = ~(item_lt.out & ~all_present_cond) @ 0
-
-    # Accumulator for duplicate item priorities.
-    accum = main.reg("accum", SCORE_WIDTH)
-    accum_add = main.add("accum_add", SCORE_WIDTH)
-    pad = main.cell("pad", ast.CompInst("std_pad", [ITEM_WIDTH, SCORE_WIDTH]))
-    with main.group("accum_priority") as accum_priority:
-        accum_add.left = accum.out
-        pad.in_ = item.out
-        accum_add.right = pad.out
-        accum.write_en = 1
-        accum.in_ = accum_add.out
-        accum_priority.done = accum.done
-
-    # Publish result back to interface memory.
-    with main.group("finish") as finish:
-        answer.write_en = 1
-        answer.addr0 = 0
-        answer.in_ = accum.out
-        finish.done = answer.write_done
-
-    # Control fragment: a loop to *populate* a filter (i.e., mark
-    # contents but don't check them).
-    def populate_loop(filt):
-        return contents_loop(
-            item_lt.out,
-            check_item,
-            invoke(filt, in_value=item.out, in_set=const(1, 1),
-                   in_clear=const(1, 0)),
-        )
-
-    # Control fragment: a loop to *check* all the filters, aborting
-    # early if we find a collision.
-    check_loop = contents_loop(
-        break_cond.out,
-        check_item_break,
-        [
-            ast.ParComp([
-                invoke(filt, in_value=item.out, in_set=const(1, 0),
-                       in_clear=const(1, 0))
-                for filt in filters
-            ]),
-            if_(all_present.out, presence_check, accum_priority),
-        ],
-    )
+    # Increment for rucksack loop.
+    rucksack_add = main.add("rucksack_add", RUCKSACK_IDX_WIDTH)
+    with main.group("incr_rucksack") as incr_rucksack:
+        rucksack_add.left = rucksack_idx.out
+        rucksack_add.right = 1
+        rucksack_idx.write_en = 1
+        rucksack_idx.in_ = rucksack_add.out
+        incr_rucksack.done = rucksack_idx.done
 
     # Larger control fragment: "unrolled loop" to process all the
     # contiguous rucksacks in a "team" (not the term used in the
@@ -302,6 +286,22 @@ def build(rucksacks_per_team=1):
                in_clear=const(1, 1))
         for filt in filters
     ])
+
+    # Exit check for rucksack loop.
+    rucksack_lt = main.cell(
+        "rucksack_lt",
+        ast.Stdlib().op("lt", RUCKSACK_IDX_WIDTH, signed=False),
+    )
+    with main.comb_group("check_rucksack") as check_rucksack:
+        rucksack_lt.left = rucksack_idx.out
+        rucksack_lt.right = rucksacks_reg.out
+
+    # Publish result back to interface memory.
+    with main.group("finish") as finish:
+        answer.write_en = 1
+        answer.addr0 = 0
+        answer.in_ = accum.out
+        finish.done = answer.write_done
 
     # Overall control program.
     main.control += [

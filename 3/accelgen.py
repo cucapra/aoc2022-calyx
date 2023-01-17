@@ -324,6 +324,18 @@ def build(rucksacks_per_team=1):
 
 
 def build_filter(prog, width):
+    """Build a bitmask-based filter component definition.
+    
+    The filter consists of a bitmask memory that has 1 bit per possible
+    value in the range from 0 to `width`. It supports 3 operations:
+    clear (set all bits to 0), set (set a given bit to 1), and
+    check-present (get the given bit).
+    
+    It would be *really* nice here if Calyx had "methods" so we could
+    clearly invoke one of those 3 behaviors. Instead, there are 3 1-bit
+    ports where you tell the component what to do; it is an error to
+    set more than one at a time.
+    """
     filter = prog.component("filter")
 
     filter.input("value", width)

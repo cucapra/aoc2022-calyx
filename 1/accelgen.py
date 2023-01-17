@@ -1,17 +1,11 @@
 import sys
 from calyx.builder import Builder, while_, if_, invoke, const
 from calyx import py_ast as ast
+import genutil
 
 WIDTH = 32
 MAX_SIZE = 4096
-IDX_WIDTH = MAX_SIZE.bit_length()
-
-
-def build_mem(comp, name, width, size):
-    idx_width = size.bit_length()
-    comp.prog.import_("primitives/memories.futil")
-    inst = ast.CompInst("seq_mem_d1", [width, size, idx_width])
-    return comp.cell(name, inst, is_external=True)
+IDX_WIDTH = (MAX_SIZE - 1).bit_length()
 
 
 def build(num_elves):
@@ -24,10 +18,10 @@ def build(num_elves):
     main = prog.component("main")
 
     # Interface memories.
-    calories = build_mem(main, "calories", WIDTH, MAX_SIZE)
-    markers = build_mem(main, "markers", 1, MAX_SIZE)
-    count = build_mem(main, "count", WIDTH, 1)
-    answer = build_mem(main, "answer", WIDTH, 1)
+    calories = genutil.build_mem(main, "calories", WIDTH, MAX_SIZE)
+    markers = genutil.build_mem(main, "markers", 1, MAX_SIZE)
+    count = genutil.build_mem(main, "count", WIDTH, 1)
+    answer = genutil.build_mem(main, "answer", WIDTH, 1)
 
     # Temporaries.
     index = main.reg("index", IDX_WIDTH)

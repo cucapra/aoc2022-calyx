@@ -2,6 +2,7 @@ from functools import reduce
 import sys
 from calyx.builder import Builder, while_, if_, const, invoke
 from calyx import py_ast as ast
+import genutil
 
 MAX_CONTENTS = 16384
 MAX_RUCKSACKS = 512
@@ -11,13 +12,6 @@ SCORE_WIDTH = 32
 
 RUCKSACK_IDX_WIDTH = (MAX_RUCKSACKS - 1).bit_length()
 CONTENTS_IDX_WIDTH = (MAX_CONTENTS - 1).bit_length()
-
-
-def build_mem(comp, name, width, size, is_external=True, is_ref=False):
-    idx_width = (size - 1).bit_length() if size > 1 else 1
-    comp.prog.import_("primitives/memories.futil")
-    inst = ast.CompInst("seq_mem_d1", [width, size, idx_width])
-    return comp.cell(name, inst, is_external=is_external, is_ref=is_ref)
 
 
 def build_item_loop(main, contents, item_idx, global_item_idx, item):
@@ -264,10 +258,10 @@ def build(rucksacks_per_team=1):
     main = prog.component("main")
 
     # Inputs & outputs.
-    contents = build_mem(main, "contents", ITEM_WIDTH, MAX_CONTENTS)
-    lengths = build_mem(main, "lengths", LENGTH_WIDTH, MAX_RUCKSACKS)
-    rucksacks = build_mem(main, "rucksacks", RUCKSACK_IDX_WIDTH, 1)
-    answer = build_mem(main, "answer", SCORE_WIDTH, 1)
+    contents = genutil.build_mem(main, "contents", ITEM_WIDTH, MAX_CONTENTS)
+    lengths = genutil.build_mem(main, "lengths", LENGTH_WIDTH, MAX_RUCKSACKS)
+    rucksacks = genutil.build_mem(main, "rucksacks", RUCKSACK_IDX_WIDTH, 1)
+    answer = genutil.build_mem(main, "answer", SCORE_WIDTH, 1)
 
     # Filter subcomponents. We need one fewer filters than we have
     # chunks of components to process: the last one will merely check
@@ -337,7 +331,8 @@ def build_filter(prog, width):
     filter.input("clear", 1)
     filter.output("present", 1)
 
-    markers = build_mem(filter, "markers", 1, 2 ** width, is_external=False)
+    markers = genutil.build_mem(filter, "markers", 1, 2 ** width,
+                                is_external=False)
 
     # Check whether the value has been seen before.
     present_reg = filter.reg("present_reg", 1)

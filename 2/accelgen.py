@@ -1,10 +1,11 @@
 import sys
 from calyx.builder import Builder, while_, invoke, const
 from calyx import py_ast as ast
+import genutil
 
 WIDTH = 32
 MAX_SIZE = 4096
-IDX_WIDTH = MAX_SIZE.bit_length()
+IDX_WIDTH = (MAX_SIZE - 1).bit_length()
 
 ROCK = LOSE = 0  # A, X
 PAPER = DRAW = 1  # B, Y
@@ -21,13 +22,6 @@ DRAW_SCORE = 3
 WIN_SCORE = 6
 
 
-def build_mem(comp, name, width, size, is_external=True, is_ref=False):
-    idx_width = size.bit_length()
-    comp.prog.import_("primitives/memories.futil")
-    inst = ast.CompInst("seq_mem_d1", [width, size, idx_width])
-    return comp.cell(name, inst, is_external=is_external, is_ref=is_ref)
-
-
 def build(part2):
     """Build the `main` component for AOC day 2.
 
@@ -39,10 +33,10 @@ def build(part2):
     main = prog.component("main")
 
     # Inputs & outputs.
-    them_mem = build_mem(main, "them", 2, MAX_SIZE)
-    us_mem = build_mem(main, "us", 2, MAX_SIZE)
-    count = build_mem(main, "count", IDX_WIDTH, 1)
-    answer = build_mem(main, "answer", WIDTH, 1)
+    them_mem = genutil.build_mem(main, "them", 2, MAX_SIZE)
+    us_mem = genutil.build_mem(main, "us", 2, MAX_SIZE)
+    count = genutil.build_mem(main, "count", IDX_WIDTH, 1)
+    answer = genutil.build_mem(main, "answer", WIDTH, 1)
 
     # Scoring subcomponent.
     scorer_def = build_scorer(prog, part2)
